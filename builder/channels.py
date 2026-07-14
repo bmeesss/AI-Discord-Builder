@@ -6,25 +6,89 @@ All Discord actions related to channels:
 - Delete
 - Move
 - Rename
+
+Supports:
+- Text channels
+- Voice channels
+- Emoji prefixed channels
 """
 
 import re
+import unicodedata
 
 import discord
 
 from builder.categories import find_category
 
 
+def clean_discord_name(name: str) -> str:
+    """
+    Removes emojis and Discord formatting from names.
+    Example:
+    🔊 Algemeen -> algemeen
+    """
+
+    name = unicodedata.normalize("NFKD", name)
+
+    # remove emojis/symbols
+    name = "".join(
+        char for char in name
+        if unicodedata.category(char)[0] not in ("S", "C")
+    )
+
+    return name.strip()
+
+
 def normalize_channel_name(raw_name: str) -> str:
     """
-    Converts a channel name into Discord's preferred format.
+    Converts channel names to Discord format.
     """
-    name = raw_name.strip().lower()
-    name = re.sub(r"\s+", "-", name)
-    name = re.sub(r"[^a-z0-9\-_]", "", name)
-    name = re.sub(r"-{2,}", "-", name).strip("-")
 
-    return name or "channel"
+    name = clean_discord_name(raw_name)
+
+    name = name.lower()
+    name = re.sub(r"\s+", "-", name)
+    name = re.sub(
+        r"[^a-z0-9\-_]",
+        "",
+        name
+    )
+
+    name = re.sub(
+        r"-{2,}",
+        "-",
+        name
+    )
+
+    return name.strip("-") or "channel"
+
+
+
+def find_channel(
+    guild: discord.Guild,
+    name: str
+):
+
+    """
+    Finds text or voice channel.
+    Supports emoji names.
+    """
+
+    clean = normalize_channel_name(name)
+
+
+    for channel in guild.channels:
+
+        channel_clean = normalize_channel_name(
+            channel.name
+        )
+
+        if channel_clean == clean:
+            return channel
+
+
+    return None
+
 
 
 async def create_channel(
@@ -32,44 +96,63 @@ async def create_channel(
     name: str,
     category_name: str | None = None,
     channel_type: str = "text",
-) -> discord.abc.GuildChannel:
+):
 
     clean_name = normalize_channel_name(name)
-    category = find_category(guild, category_name) if category_name else None
 
-    existing = discord.utils.get(guild.channels, name=clean_name)
+    category = (
+        find_category(
+            guild,
+            category_name
+        )
+        if category_name
+        else None
+    )
 
-    if existing and (category is None or existing.category == category):
+
+    existing = find_channel(
+        guild,
+        clean_name
+    )
+
+
+    if existing:
         return existing
 
+
+
     if channel_type == "voice":
+
         return await guild.create_voice_channel(
             name=clean_name,
             category=category,
-            reason="AI-Discord-Builder: created voice channel",
+            reason="AI-Discord-Builder: created voice channel"
         )
+
 
     return await guild.create_text_channel(
         name=clean_name,
         category=category,
-        reason="AI-Discord-Builder: created text channel",
+        reason="AI-Discord-Builder: created text channel"
     )
+
 
 
 async def delete_channel(
     guild: discord.Guild,
-    name: str,
+    name: str
 ) -> bool:
 
-    clean_name = normalize_channel_name(name)
 
-    channel = (
-        discord.utils.get(guild.channels, name=clean_name)
-        or discord.utils.get(guild.channels, name=name)
+    channel = find_channel(
+        guild,
+        name
     )
+
 
     if not channel:
         return False
+
 
     await channel.delete(
         reason="AI-Discord-Builder: deleted channel"
@@ -78,63 +161,87 @@ async def delete_channel(
     return True
 
 
+
+
 async def move_channel(
     guild: discord.Guild,
     name: str,
-    target_category_name: str,
+    target_category_name: str
 ) -> bool:
 
-    clean_name = normalize_channel_name(name)
 
-    channel = (
-        discord.utils.get(guild.channels, name=clean_name)
-        or discord.utils.get(guild.channels, name=name)
+    channel = find_channel(
+        guild,
+        name
     )
+
 
     category = find_category(
         guild,
-        target_category_name,
+        target_category_name
     )
+
 
     if not channel or not category:
         return False
 
+
+
     await channel.edit(
         category=category,
-        reason="AI-Discord-Builder: moved channel",
+        reason="AI-Discord-Builder: moved channel"
     )
 
+
     return True
+
+
 
 
 async def rename_channel(
     guild: discord.Guild,
     old_name: str,
-    new_name: str,
+    new_name: str
 ) -> bool:
 
-    old_clean = normalize_channel_name(old_name)
-    new_clean = normalize_channel_name(new_name)
 
-    channel = (
-        discord.utils.get(guild.channels, name=old_clean)
-        or discord.utils.get(guild.channels, name=old_name)
+    channel = find_channel(
+        guild,
+        old_name
     )
+
 
     if not channel:
         return False
 
-    existing = discord.utils.get(
-        guild.channels,
-        name=new_clean,
+
+
+    new_clean = normalize_channel_name(
+        new_name
     )
+
+
+    # already correct
+    if normalize_channel_name(channel.name) == new_clean:
+        return True
+
+
+
+    existing = find_channel(
+        guild,
+        new_clean
+    )
+
 
     if existing:
         return True
 
+
+
     await channel.edit(
         name=new_clean,
-        reason="AI-Discord-Builder: renamed channel",
+        reason="AI-Discord-Builder: renamed channel"
     )
+
 
     return True
