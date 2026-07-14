@@ -1,8 +1,8 @@
-
+"""
 main.py
 Entrypoint van AI-Discord-Builder. Zet logging op, laadt config, registreert
 de /ask cog, start Flask webserver en start de Discord bot.
-
+"""
 
 import asyncio
 import logging
@@ -15,42 +15,58 @@ from discord.ext import commands
 import config
 from web.app import app
 
+
 # --- Flask webserver ---
 
 def run_web():
-app.run(
-host="0.0.0.0",
-port=8080
-)
+    app.run(
+        host="0.0.0.0",
+        port=8080
+    )
+
 
 threading.Thread(
-target=run_web,
-daemon=True
+    target=run_web,
+    daemon=True
 ).start()
+
 
 # --- Logging setup ---
 
-os.makedirs(os.path.dirname(config.LOG_FILE_PATH) or ".", exist_ok=True)
+os.makedirs(
+    os.path.dirname(config.LOG_FILE_PATH) or ".",
+    exist_ok=True
+)
 
 root_logger = logging.getLogger("ai_discord_builder")
 root_logger.setLevel(logging.INFO)
 
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(
-logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+    logging.Formatter(
+        "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+    )
 )
+
 root_logger.addHandler(console_handler)
 
 file_handler = logging.FileHandler(
-config.LOG_FILE_PATH,
-encoding="utf-8"
+    config.LOG_FILE_PATH,
+    encoding="utf-8"
 )
+
 file_handler.setFormatter(
-logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+    logging.Formatter(
+        "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+    )
 )
+
 root_logger.addHandler(file_handler)
 
-logger = logging.getLogger("ai_discord_builder.main")
+logger = logging.getLogger(
+    "ai_discord_builder.main"
+)
+
 
 # --- Bot setup ---
 
@@ -59,43 +75,48 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(
-command_prefix="!",
-intents=intents
+    command_prefix="!",
+    intents=intents
 )
+
 
 @bot.event
 async def on_ready():
-logger.info(
-"Ingelogd als %s (ID: %s)",
-bot.user,
-bot.user.id
-)
-
-
-try:
-    synced = await bot.tree.sync()
     logger.info(
-        "Synced %d slash command(s)",
-        len(synced)
+        "Ingelogd als %s (ID: %s)",
+        bot.user,
+        bot.user.id
     )
 
-except Exception:
-    logger.exception(
-        "Slash command sync mislukt"
-    )
-```
+    try:
+        synced = await bot.tree.sync()
+
+        logger.info(
+            "Synced %d slash command(s)",
+            len(synced)
+        )
+
+    except Exception:
+        logger.exception(
+            "Slash command sync mislukt"
+        )
+
 
 async def load_extensions():
-await bot.load_extension("commands.ask")
+    await bot.load_extension(
+        "commands.ask"
+    )
+
 
 async def main():
-config.validate_config()
+    config.validate_config()
+
+    async with bot:
+        await load_extensions()
+        await bot.start(
+            config.DISCORD_TOKEN
+        )
 
 
-async with bot:
-    await load_extensions()
-    await bot.start(config.DISCORD_TOKEN)
-
-
-if **name** == "**main**":
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
