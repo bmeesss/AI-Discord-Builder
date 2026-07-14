@@ -17,7 +17,9 @@ logger = logging.getLogger("ai_discord_builder.ai_client")
 
 VALID_ACTION_TYPES = {
     "create_category",
+    "rename_category",
     "create_channel",
+    "rename_channel",
     "delete_channel",
     "move_channel",
     "create_role",
@@ -165,8 +167,14 @@ class AIClient:
             if invalid_perms:
                 raise AIPlanError(f"Actie #{index}: ongeldige permissions {invalid_perms}")
 
-        if action_type == "rename_role":
+        if action_type in (
+            "rename_role",
+            "rename_channel",
+            "rename_category",
+        ):
             if not action.get("old_name") or not action.get("new_name"):
-                raise AIPlanError(f"Actie #{index} (rename_role) mist 'old_name' of 'new_name'.")
+                raise AIPlanError(
+                    f"Actie #{index} ({action_type}) mist 'old_name' of 'new_name'."
+                )
 
         return action
