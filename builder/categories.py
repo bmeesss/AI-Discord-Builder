@@ -12,9 +12,25 @@ import discord
 
 def normalize_category_name(name: str) -> str:
     """
-    Keeps category names clean but allows normal capitalization.
+    Cleans category names for comparison.
+    Keeps normal capitalization and removes extra spaces.
     """
     return name.strip()
+
+
+def simplify_name(name: str) -> str:
+    """
+    Removes emojis and special symbols for better matching.
+    Example:
+    "📢 Nieuws" -> "nieuws"
+    """
+
+    name = name.lower().strip()
+
+    return "".join(
+        c for c in name
+        if c.isalnum() or c in " _-"
+    ).strip()
 
 
 async def create_category(
@@ -22,14 +38,14 @@ async def create_category(
     name: str
 ) -> discord.CategoryChannel:
     """
-    Creates a category or returns the existing one if it already exists.
+    Creates a category or returns the existing one.
     """
 
     clean_name = normalize_category_name(name)
 
-    existing = discord.utils.get(
-        guild.categories,
-        name=clean_name
+    existing = find_category(
+        guild,
+        clean_name
     )
 
     if existing:
@@ -46,13 +62,23 @@ def find_category(
     name: str
 ) -> discord.CategoryChannel | None:
     """
-    Finds a category case-insensitive.
+    Finds a category.
+
+    Supports:
+    - Different capitalization
+    - Emojis
+    - Extra symbols
     """
 
-    name = normalize_category_name(name).lower()
+    search = simplify_name(name)
 
     for category in guild.categories:
-        if category.name.lower() == name:
+
+        category_name = simplify_name(
+            category.name
+        )
+
+        if category_name == search:
             return category
 
     return None
@@ -75,9 +101,10 @@ async def rename_category(
     if not category:
         return False
 
-    new_name = normalize_category_name(new_name)
+    new_name = normalize_category_name(
+        new_name
+    )
 
-    # Already the same name
     if category.name == new_name:
         return True
 
