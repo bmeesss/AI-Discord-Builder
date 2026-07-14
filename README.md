@@ -125,3 +125,4 @@ Alleen na bevestiging worden er daadwerkelijk wijzigingen gemaakt.
 - **Database**: voor multi-server geheugen (bv. onthouden welke templates per
   server gebruikt zijn) kun je later SQLite of Postgres toevoegen zonder de
   bestaande structuur te breken — de executor blijft stateless per aanroep.
+lol
