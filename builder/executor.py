@@ -1,5 +1,6 @@
 """
 builder/executor.py
+
 Executes a validated action plan (list of dicts) against a Discord guild.
 Each action is handled separately so one failed action does not stop the whole plan.
 """
@@ -29,7 +30,7 @@ async def execute_plan(
     actions: list[dict]
 ) -> list[ActionResult]:
 
-    results: list[ActionResult] = []
+    results = []
 
     for action in actions:
         action_type = action.get("type")
@@ -51,11 +52,6 @@ async def execute_plan(
                 )
             )
 
-            logger.warning(
-                "Forbidden action: %s",
-                action
-            )
-
         except discord.HTTPException as e:
             results.append(
                 ActionResult(
@@ -63,12 +59,6 @@ async def execute_plan(
                     False,
                     f"Discord API error for {action_type}: {e}"
                 )
-            )
-
-            logger.warning(
-                "HTTP error action %s: %s",
-                action,
-                e
             )
 
         except Exception as e:
@@ -81,7 +71,7 @@ async def execute_plan(
             )
 
             logger.exception(
-                "Unexpected error action: %s",
+                "Action failed: %s",
                 action
             )
 
@@ -96,10 +86,13 @@ async def _execute_single_action(
     action_type = action["type"]
 
 
-    # CREATE CATEGORY
+    # =========================
+    # CATEGORY ACTIONS
+    # =========================
+
     if action_type == "create_category":
 
-        cat = await categories.create_category(
+        category = await categories.create_category(
             guild,
             action["name"]
         )
@@ -107,14 +100,39 @@ async def _execute_single_action(
         return ActionResult(
             action,
             True,
-            f"Category **{cat.name}** created (or already existed)"
+            f"Category **{category.name}** created (or already existed)"
         )
 
 
-    # CREATE CHANNEL
+    if action_type == "rename_category":
+
+        ok = await categories.rename_category(
+            guild,
+            action["old_name"],
+            action["new_name"]
+        )
+
+        if ok:
+            return ActionResult(
+                action,
+                True,
+                f"Category **{action['old_name']}** renamed to **{action['new_name']}**"
+            )
+
+        return ActionResult(
+            action,
+            False,
+            f"Category **{action['old_name']}** not found"
+        )
+
+
+    # =========================
+    # CHANNEL ACTIONS
+    # =========================
+
     if action_type == "create_channel":
 
-        ch = await channels.create_channel(
+        channel = await channels.create_channel(
             guild,
             name=action["name"],
             category_name=action.get("category"),
@@ -127,56 +145,10 @@ async def _execute_single_action(
         return ActionResult(
             action,
             True,
-            f"Channel **#{ch.name}** created (or already existed)"
+            f"Channel **#{channel.name}** created (or already existed)"
         )
 
 
-    # DELETE CHANNEL
-    if action_type == "delete_channel":
-
-        ok = await channels.delete_channel(
-            guild,
-            action["name"]
-        )
-
-        if ok:
-            return ActionResult(
-                action,
-                True,
-                f"Channel **{action['name']}** deleted"
-            )
-
-        return ActionResult(
-            action,
-            False,
-            f"Channel **{action['name']}** not found"
-        )
-
-
-    # MOVE CHANNEL
-    if action_type == "move_channel":
-
-        ok = await channels.move_channel(
-            guild,
-            action["name"],
-            action["target_category"]
-        )
-
-        if ok:
-            return ActionResult(
-                action,
-                True,
-                f"Channel **{action['name']}** moved to **{action['target_category']}**"
-            )
-
-        return ActionResult(
-            action,
-            False,
-            "Channel or category not found"
-        )
-
-
-    # RENAME CHANNEL
     if action_type == "rename_channel":
 
         ok = await channels.rename_channel(
@@ -199,7 +171,53 @@ async def _execute_single_action(
         )
 
 
-    # CREATE ROLE
+    if action_type == "delete_channel":
+
+        ok = await channels.delete_channel(
+            guild,
+            action["name"]
+        )
+
+        if ok:
+            return ActionResult(
+                action,
+                True,
+                f"Channel **{action['name']}** deleted"
+            )
+
+        return ActionResult(
+            action,
+            False,
+            f"Channel **{action['name']}** not found"
+        )
+
+
+    if action_type == "move_channel":
+
+        ok = await channels.move_channel(
+            guild,
+            action["name"],
+            action["target_category"]
+        )
+
+        if ok:
+            return ActionResult(
+                action,
+                True,
+                f"Channel **{action['name']}** moved to **{action['target_category']}**"
+            )
+
+        return ActionResult(
+            action,
+            False,
+            "Channel or category not found"
+        )
+
+
+    # =========================
+    # ROLE ACTIONS
+    # =========================
+
     if action_type == "create_role":
 
         role = await roles.create_role(
@@ -227,29 +245,6 @@ async def _execute_single_action(
         )
 
 
-    # DELETE ROLE
-    if action_type == "delete_role":
-
-        ok = await roles.delete_role(
-            guild,
-            action["name"]
-        )
-
-        if ok:
-            return ActionResult(
-                action,
-                True,
-                f"Role **{action['name']}** deleted"
-            )
-
-        return ActionResult(
-            action,
-            False,
-            f"Role **{action['name']}** not found"
-        )
-
-
-    # RENAME ROLE
     if action_type == "rename_role":
 
         ok = await roles.rename_role(
@@ -272,30 +267,29 @@ async def _execute_single_action(
         )
 
 
-    return ActionResult(
-        action,
-        False,
-        f"Unknown action type: {action_type}"
-    )
+    if action_type == "delete_role":
 
-        # RENAME CATEGORY
-    if action_type == "rename_category":
-
-        ok = await categories.rename_category(
+        ok = await roles.delete_role(
             guild,
-            action["old_name"],
-            action["new_name"]
+            action["name"]
         )
 
         if ok:
             return ActionResult(
                 action,
                 True,
-                f"Category **{action['old_name']}** renamed to **{action['new_name']}**"
+                f"Role **{action['name']}** deleted"
             )
 
         return ActionResult(
             action,
             False,
-            f"Category **{action['old_name']}** not found"
+            f"Role **{action['name']}** not found"
         )
+
+
+    return ActionResult(
+        action,
+        False,
+        f"Unknown action type: {action_type}"
+    )
