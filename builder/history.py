@@ -1,19 +1,14 @@
 """
 builder/history.py
 
-Stores Discord action history for rollback support.
+Persistent Discord action history.
 
-Current:
-- Memory storage
-- Per guild history
-
-Later:
-- Replace with Supabase/PostgreSQL
+Uses Supabase database instead of memory.
 """
 
-import time
-import copy
 import logging
+
+from database.supabase import supabase
 
 
 logger = logging.getLogger(
@@ -21,62 +16,95 @@ logger = logging.getLogger(
 )
 
 
+
 # =========================
-# MEMORY STORAGE
+# SAVE ACTION
 # =========================
-
-_history = {}
-
-
-
-
 
 def add_action(
     guild_id: int,
-    action: dict
+    action: dict,
+    user_id: int | None = None
 ):
     """
     Save completed AI action.
-
-    Uses deepcopy so future changes
-    do not modify stored history.
     """
 
-    if guild_id not in _history:
+    try:
 
-        _history[guild_id] = []
-
-
-
-    _history[guild_id].append(
-        {
-            "action": copy.deepcopy(action),
-            "timestamp": time.time()
-        }
-    )
-
-
-    logger.info(
-        "Saved history action for guild %s: %s",
-        guild_id,
-        action.get("type")
-    )
+        supabase.table(
+            "actions"
+        ).insert(
+            {
+                "guild_id": str(guild_id),
+                "user_id": str(user_id) if user_id else None,
+                "action_type": action.get("type"),
+                "data": action
+            }
+        ).execute()
 
 
+        logger.info(
+            "Saved action %s for guild %s",
+            action.get("type"),
+            guild_id
+        )
 
 
+    except Exception:
+
+        logger.exception(
+            "Failed saving action"
+        )
+
+
+
+
+
+# =========================
+# GET HISTORY
+# =========================
 
 def get_history(
     guild_id: int
 ) -> list:
     """
-    Get complete history for guild.
+    Get all actions from guild.
     """
 
-    return _history.get(
-        guild_id,
-        []
-    )
+    try:
+
+        result = (
+            supabase.table("actions")
+            .select("*")
+            .eq(
+                "guild_id",
+                str(guild_id)
+            )
+            .order(
+                "created_at",
+                desc=False
+            )
+            .execute()
+        )
+
+
+        return [
+            {
+                "action": row["data"],
+                "timestamp": row["created_at"]
+            }
+            for row in result.data
+        ]
+
+
+    except Exception:
+
+        logger.exception(
+            "Failed loading history"
+        )
+
+        return []
 
 
 
@@ -90,53 +118,106 @@ def get_last_actions(
     Get latest actions.
     """
 
-    history = get_history(
-        guild_id
-    )
-
-
     if amount <= 0:
+        return []
+
+
+    try:
+
+        result = (
+            supabase.table("actions")
+            .select("*")
+            .eq(
+                "guild_id",
+                str(guild_id)
+            )
+            .order(
+                "created_at",
+                desc=True
+            )
+            .limit(amount)
+            .execute()
+        )
+
+
+        return [
+            {
+                "action": row["data"],
+                "timestamp": row["created_at"]
+            }
+            for row in result.data
+        ]
+
+
+    except Exception:
+
+        logger.exception(
+            "Failed getting latest actions"
+        )
 
         return []
 
 
-    return history[-amount:]
 
 
 
-
+# =========================
+# REMOVE AFTER ROLLBACK
+# =========================
 
 def remove_last_actions(
     guild_id: int,
     amount: int = 1
 ):
     """
-    Remove latest actions after rollback.
+    Remove rolled back actions.
     """
 
-    if guild_id not in _history:
-
-        return
-
-
-
     if amount <= 0:
-
         return
 
 
+    try:
 
-    _history[guild_id] = (
-        _history[guild_id][:-amount]
-    )
+        rows = (
+            supabase.table("actions")
+            .select("id")
+            .eq(
+                "guild_id",
+                str(guild_id)
+            )
+            .order(
+                "created_at",
+                desc=True
+            )
+            .limit(amount)
+            .execute()
+        )
+
+
+        for row in rows.data:
+
+            supabase.table(
+                "actions"
+            ).delete().eq(
+                "id",
+                row["id"]
+            ).execute()
 
 
 
-    logger.info(
-        "Removed %s history actions for guild %s",
-        amount,
-        guild_id
-    )
+        logger.info(
+            "Removed %s actions from guild %s",
+            amount,
+            guild_id
+        )
+
+
+    except Exception:
+
+        logger.exception(
+            "Failed removing actions"
+        )
 
 
 
@@ -146,17 +227,23 @@ def clear_history(
     guild_id: int
 ):
     """
-    Delete all history for guild.
+    Delete all guild actions.
     """
 
-    if guild_id in _history:
+    try:
 
-        del _history[guild_id]
+        supabase.table(
+            "actions"
+        ).delete().eq(
+            "guild_id",
+            str(guild_id)
+        ).execute()
 
 
-        logger.info(
-            "Cleared history for guild %s",
-            guild_id
+    except Exception:
+
+        logger.exception(
+            "Failed clearing history"
         )
 
 
@@ -166,13 +253,7 @@ def clear_history(
 def get_history_count(
     guild_id: int
 ) -> int:
-    """
-    Returns amount of saved actions.
-    """
 
     return len(
-        _history.get(
-            guild_id,
-            []
-        )
+        get_history(guild_id)
     )
