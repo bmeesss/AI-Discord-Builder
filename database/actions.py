@@ -1,5 +1,3 @@
-import json
-
 from database.supabase import supabase
 
 
@@ -20,8 +18,6 @@ def add_action(
             "data": action
         }
     ).execute()
-
-
 
 
 
@@ -49,7 +45,7 @@ def get_last_actions(
     actions = []
 
 
-    for row in result.data:
+    for row in reversed(result.data):
 
         actions.append(
             {
@@ -60,8 +56,6 @@ def get_last_actions(
 
 
     return actions
-
-
 
 
 
