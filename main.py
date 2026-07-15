@@ -1,7 +1,14 @@
 """
 main.py
-Entrypoint van AI-Discord-Builder. Zet logging op, laadt config, registreert
-de /ask cog, start Flask webserver en start de Discord bot.
+
+Entrypoint van AI-Discord-Builder.
+
+Start:
+- Flask webserver
+- Discord bot
+- Logging
+- Slash commands
+- Cogs/extensions
 """
 
 import asyncio
@@ -16,13 +23,18 @@ import config
 from web.app import app
 
 
-# --- Flask webserver ---
+
+# =========================
+# FLASK WEB SERVER
+# =========================
 
 def run_web():
+
     app.run(
         host="0.0.0.0",
         port=8080
     )
+
 
 
 threading.Thread(
@@ -31,48 +43,84 @@ threading.Thread(
 ).start()
 
 
-# --- Logging setup ---
+
+
+
+# =========================
+# LOGGING
+# =========================
 
 os.makedirs(
-    os.path.dirname(config.LOG_FILE_PATH) or ".",
+    os.path.dirname(
+        config.LOG_FILE_PATH
+    ) or ".",
     exist_ok=True
 )
 
-root_logger = logging.getLogger("ai_discord_builder")
-root_logger.setLevel(logging.INFO)
 
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(
-    logging.Formatter(
-        "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+root_logger = logging.getLogger(
+    "ai_discord_builder"
+)
+
+root_logger.setLevel(
+    logging.INFO
+)
+
+
+if not root_logger.handlers:
+
+    console_handler = logging.StreamHandler()
+
+    console_handler.setFormatter(
+        logging.Formatter(
+            "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+        )
     )
-)
 
-root_logger.addHandler(console_handler)
 
-file_handler = logging.FileHandler(
-    config.LOG_FILE_PATH,
-    encoding="utf-8"
-)
-
-file_handler.setFormatter(
-    logging.Formatter(
-        "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+    root_logger.addHandler(
+        console_handler
     )
-)
 
-root_logger.addHandler(file_handler)
+
+
+    file_handler = logging.FileHandler(
+        config.LOG_FILE_PATH,
+        encoding="utf-8"
+    )
+
+
+    file_handler.setFormatter(
+        logging.Formatter(
+            "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+        )
+    )
+
+
+    root_logger.addHandler(
+        file_handler
+    )
+
+
 
 logger = logging.getLogger(
     "ai_discord_builder.main"
 )
 
 
-# --- Bot setup ---
+
+
+
+# =========================
+# DISCORD BOT
+# =========================
 
 intents = discord.Intents.default()
+
 intents.guilds = True
 intents.members = True
+
+
 
 bot = commands.Bot(
     command_prefix="!",
@@ -80,43 +128,109 @@ bot = commands.Bot(
 )
 
 
+
+
+
 @bot.event
 async def on_ready():
+
     logger.info(
-        "Ingelogd als %s (ID: %s)",
+        "Logged in as %s (ID: %s)",
         bot.user,
         bot.user.id
     )
 
+
     try:
+
         synced = await bot.tree.sync()
+
 
         logger.info(
             "Synced %d slash command(s)",
             len(synced)
         )
 
+
     except Exception:
+
         logger.exception(
-            "Slash command sync mislukt"
+            "Slash command sync failed"
         )
 
 
-async def load_extensions():
-    await bot.load_extension(
-        "commands.ask"
-    )
 
+
+
+
+
+# =========================
+# EXTENSIONS
+# =========================
+
+async def load_extensions():
+
+    extensions = [
+
+        "commands.ask",
+
+        "commands.rollback"
+
+    ]
+
+
+    for extension in extensions:
+
+        try:
+
+            await bot.load_extension(
+                extension
+            )
+
+
+            logger.info(
+                "Loaded extension: %s",
+                extension
+            )
+
+
+        except Exception:
+
+            logger.exception(
+                "Failed loading extension: %s",
+                extension
+            )
+
+
+
+
+
+
+
+# =========================
+# START BOT
+# =========================
 
 async def main():
+
     config.validate_config()
 
+
     async with bot:
+
         await load_extensions()
+
+
         await bot.start(
             config.DISCORD_TOKEN
         )
 
 
+
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+
+    asyncio.run(
+        main()
+    )

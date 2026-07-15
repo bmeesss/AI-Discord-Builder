@@ -1,29 +1,32 @@
 """
 builder/executor.py
 
-Executes a validated action plan (list of dicts) against a Discord guild.
+Executes validated AI action plans.
 
-Supported actions:
-- Categories
-- Channels
-- Messages
-- Roles
-
-Each action is handled separately so one failed action
-does not stop the whole plan.
+Features:
+- Create/Delete/Rename/Move channels
+- Create/Rename/Delete categories
+- Create/Rename/Delete roles
+- Send messages
+- Saves actions for rollback
 """
 
 import logging
 
 import discord
 
-from builder import categories, channels, roles
-from builder.finder import find_channel
+from builder import categories, channels, roles, history
+
+from builder.finder import (
+    find_channel
+)
 
 
 logger = logging.getLogger(
     "ai_discord_builder.executor"
 )
+
+
 
 
 
@@ -35,22 +38,37 @@ class ActionResult:
         success: bool,
         detail: str
     ):
-
         self.action = action
         self.success = success
         self.detail = detail
 
 
-
     def __str__(self):
 
-        icon = (
-            "✅"
-            if self.success
-            else "❌"
-        )
+        icon = "✅" if self.success else "❌"
 
         return f"{icon} {self.detail}"
+
+
+
+
+
+def save_history(
+    guild: discord.Guild,
+    action: dict
+):
+    """
+    Save successful action.
+    """
+
+    history.add_action(
+        guild.id,
+        action
+    )
+
+
+
+
 
 
 
@@ -60,7 +78,6 @@ async def execute_plan(
     guild: discord.Guild,
     actions: list[dict]
 ) -> list[ActionResult]:
-
 
     results = []
 
@@ -78,7 +95,6 @@ async def execute_plan(
                 guild,
                 action
             )
-
 
             results.append(
                 result
@@ -102,7 +118,7 @@ async def execute_plan(
                 ActionResult(
                     action,
                     False,
-                    f"Discord error for {action_type}: {e}"
+                    f"Discord error: {e}"
                 )
             )
 
@@ -110,19 +126,16 @@ async def execute_plan(
         except Exception as e:
 
             logger.exception(
-                "Action failed: %s",
-                action
+                "Action failed"
             )
-
 
             results.append(
                 ActionResult(
                     action,
                     False,
-                    f"Unexpected error: {e}"
+                    f"Error: {e}"
                 )
             )
-
 
 
     return results
@@ -132,14 +145,16 @@ async def execute_plan(
 
 
 
+
+
+
+
 async def _execute_single_action(
     guild: discord.Guild,
     action: dict
-) -> ActionResult:
-
+):
 
     action_type = action["type"]
-
 
 
 
@@ -157,11 +172,19 @@ async def _execute_single_action(
         )
 
 
+        save_history(
+            guild,
+            action
+        )
+
+
         return ActionResult(
             action,
             True,
-            f"Category **{category.name}** created"
+            f"Category {category.name} created"
         )
+
+
 
 
 
@@ -174,14 +197,25 @@ async def _execute_single_action(
         )
 
 
+        if ok:
+
+            save_history(
+                guild,
+                action
+            )
+
+
+            return ActionResult(
+                action,
+                True,
+                "Category renamed"
+            )
+
+
         return ActionResult(
             action,
-            ok,
-            (
-                f"Category renamed to **{action['new_name']}**"
-                if ok
-                else f"Category **{action['old_name']}** not found"
-            )
+            False,
+            "Category not found"
         )
 
 
@@ -199,22 +233,28 @@ async def _execute_single_action(
 
         channel = await channels.create_channel(
             guild,
-            name=action["name"],
-            category_name=action.get(
-                "category"
-            ),
-            channel_type=action.get(
+            action["name"],
+            action.get("category"),
+            action.get(
                 "channel_type",
                 "text"
             )
         )
 
 
+        save_history(
+            guild,
+            action
+        )
+
+
         return ActionResult(
             action,
             True,
-            f"Channel **#{channel.name}** created"
+            f"Channel #{channel.name} created"
         )
+
+
 
 
 
@@ -229,15 +269,28 @@ async def _execute_single_action(
         )
 
 
+        if ok:
+
+            save_history(
+                guild,
+                action
+            )
+
+
+            return ActionResult(
+                action,
+                True,
+                "Channel renamed"
+            )
+
+
         return ActionResult(
             action,
-            ok,
-            (
-                f"Channel renamed to **{action['new_name']}**"
-                if ok
-                else f"Channel **{action['old_name']}** not found"
-            )
+            False,
+            "Channel not found"
         )
+
+
 
 
 
@@ -245,21 +298,39 @@ async def _execute_single_action(
 
     if action_type == "delete_channel":
 
-        ok = await channels.delete_channel(
+        channel = find_channel(
             guild,
             action["name"]
         )
 
 
+        if not channel:
+
+            return ActionResult(
+                action,
+                False,
+                "Channel not found"
+            )
+
+
+        await channel.delete(
+            reason="AI-Discord-Builder"
+        )
+
+
+        save_history(
+            guild,
+            action
+        )
+
+
         return ActionResult(
             action,
-            ok,
-            (
-                f"Channel **{action['name']}** deleted"
-                if ok
-                else f"Channel **{action['name']}** not found"
-            )
+            True,
+            "Channel deleted"
         )
+
+
 
 
 
@@ -274,14 +345,25 @@ async def _execute_single_action(
         )
 
 
+        if ok:
+
+            save_history(
+                guild,
+                action
+            )
+
+
+            return ActionResult(
+                action,
+                True,
+                "Channel moved"
+            )
+
+
         return ActionResult(
             action,
-            ok,
-            (
-                f"Channel moved to **{action['target_category']}**"
-                if ok
-                else "Channel or category not found"
-            )
+            False,
+            "Channel/category not found"
         )
 
 
@@ -290,14 +372,12 @@ async def _execute_single_action(
 
 
 
-
     # =========================
-    # MESSAGE ACTIONS
+    # SEND MESSAGE
     # =========================
 
 
     if action_type == "send_message":
-
 
         channel = find_channel(
             guild,
@@ -310,7 +390,7 @@ async def _execute_single_action(
             return ActionResult(
                 action,
                 False,
-                f"Channel **{action['channel']}** not found"
+                "Channel not found"
             )
 
 
@@ -323,21 +403,37 @@ async def _execute_single_action(
             return ActionResult(
                 action,
                 False,
-                f"**{channel.name}** is not a text channel"
+                "Channel is not text"
             )
 
 
 
-        await channel.send(
+        message = await channel.send(
             action["content"]
+        )
+
+
+        # Save rollback information separately
+
+        history_action = action.copy()
+
+        history_action["message_id"] = message.id
+        history_action["channel_id"] = channel.id
+
+
+
+        save_history(
+            guild,
+            history_action
         )
 
 
         return ActionResult(
             action,
             True,
-            f"Message sent in **#{channel.name}**"
+            f"Message sent in #{channel.name}"
         )
+
 
 
 
@@ -355,30 +451,36 @@ async def _execute_single_action(
 
         role = await roles.create_role(
             guild,
-            name=action["name"],
-            permission_names=action.get(
+            action["name"],
+            action.get(
                 "permissions",
                 []
             ),
-            color_hex=action.get(
-                "color"
-            ),
-            mentionable=action.get(
+            action.get("color"),
+            action.get(
                 "mentionable",
                 True
             ),
-            hoist=action.get(
+            action.get(
                 "hoist",
                 True
             )
         )
 
 
+        save_history(
+            guild,
+            action
+        )
+
+
         return ActionResult(
             action,
             True,
-            f"Role **{role.name}** created"
+            f"Role {role.name} created"
         )
+
+
 
 
 
@@ -393,15 +495,28 @@ async def _execute_single_action(
         )
 
 
+        if ok:
+
+            save_history(
+                guild,
+                action
+            )
+
+
+            return ActionResult(
+                action,
+                True,
+                "Role renamed"
+            )
+
+
         return ActionResult(
             action,
-            ok,
-            (
-                f"Role renamed to **{action['new_name']}**"
-                if ok
-                else f"Role **{action['old_name']}** not found"
-            )
+            False,
+            "Role not found"
         )
+
+
 
 
 
@@ -415,14 +530,25 @@ async def _execute_single_action(
         )
 
 
+        if ok:
+
+            save_history(
+                guild,
+                action
+            )
+
+
+            return ActionResult(
+                action,
+                True,
+                "Role deleted"
+            )
+
+
         return ActionResult(
             action,
-            ok,
-            (
-                f"Role **{action['name']}** deleted"
-                if ok
-                else f"Role **{action['name']}** not found"
-            )
+            False,
+            "Role not found"
         )
 
 
@@ -434,5 +560,5 @@ async def _execute_single_action(
     return ActionResult(
         action,
         False,
-        f"Unknown action type: {action_type}"
+        f"Unknown action: {action_type}"
     )
