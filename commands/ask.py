@@ -3,17 +3,17 @@ commands/ask.py
 
 AI Discord Builder main command.
 
-Flow:
-1. User uses /ask
-2. Permission checks
-3. AI creates plan
-4. User confirms
-5. Execute actions
-6. Save results + history
+Supports:
+- /ask command
+- AI plan generation
+- Confirmation system
+- Plan execution
+- Rollback button after execution
 
 Shared logic:
-- builder/flow.py handles AI planning, formatting and logging.
-- executor.py only executes Discord actions.
+- builder/flow.py handles AI planning and logging.
+- builder/executor.py executes actions.
+- builder/rollback.py handles undoing actions.
 """
 
 import logging
@@ -28,6 +28,7 @@ from discord.ext import commands
 from ai.client import AIPlanError
 
 from builder.executor import execute_plan
+from builder.rollback import rollback_actions
 
 from builder.flow import (
     build_plan,
@@ -50,6 +51,110 @@ logger = logging.getLogger(
 audit_logger = logging.getLogger(
     "ai_discord_builder.audit"
 )
+
+
+# =====================================
+# ROLLBACK VIEW
+# =====================================
+
+
+class RollbackView(
+    discord.ui.View
+):
+
+    def __init__(
+        self,
+        author_id: int,
+        guild: discord.Guild,
+    ):
+
+        super().__init__(
+            timeout=config.CONFIRMATION_TIMEOUT
+        )
+
+        self.author_id = author_id
+        self.guild = guild
+
+
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction
+    ) -> bool:
+
+        if interaction.user.id != self.author_id:
+
+            await interaction.response.send_message(
+                "❌ Only the user who created this plan can rollback it.",
+                ephemeral=True,
+            )
+
+            return False
+
+
+        return True
+
+
+
+    @discord.ui.button(
+        label="Rollback",
+        style=discord.ButtonStyle.danger,
+        emoji="↩️",
+    )
+    async def rollback(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        button.disabled = True
+
+
+        await interaction.response.edit_message(
+            content="⏳ Rolling back...",
+            view=self,
+        )
+
+
+        try:
+
+            results = await rollback_actions(
+                self.guild,
+                amount=1,
+            )
+
+
+            output = "\n".join(
+                str(x)
+                for x in results
+            )
+
+
+            embed = discord.Embed(
+                title="↩️ Rollback completed",
+                description=output[:4000],
+                color=discord.Color.orange(),
+            )
+
+
+            await interaction.followup.send(
+                embed=embed
+            )
+
+
+        except Exception as e:
+
+            logger.exception(
+                "Rollback failed"
+            )
+
+
+            await interaction.followup.send(
+                f"❌ Rollback error: {e}"
+            )
+
+
+        self.stop()
 
 
 
@@ -84,6 +189,7 @@ class ConfirmationView(
         interaction: discord.Interaction
     ) -> bool:
 
+
         if interaction.user.id != self.author_id:
 
             await interaction.response.send_message(
@@ -95,16 +201,6 @@ class ConfirmationView(
 
 
         return True
-
-
-
-    async def on_timeout(
-        self
-    ):
-
-        for item in self.children:
-
-            item.disabled = True
 
 
 
@@ -132,12 +228,11 @@ class ConfirmationView(
         )
 
 
-
         try:
 
             results = await execute_plan(
                 self.guild,
-                self.actions
+                self.actions,
             )
 
 
@@ -148,19 +243,9 @@ class ConfirmationView(
             )
 
 
-            log_conversation(
-                guild_id=self.guild.id,
-                user_id=interaction.user.id,
-                username=str(interaction.user),
-                message="Executed AI plan",
-                response=f"ERROR: {e}",
-            )
-
-
             await interaction.followup.send(
                 f"❌ Execution error: {e}"
             )
-
 
             self.stop()
 
@@ -170,8 +255,8 @@ class ConfirmationView(
 
         success = sum(
             1
-            for r in results
-            if r.success
+            for result in results
+            if result.success
         )
 
 
@@ -179,9 +264,9 @@ class ConfirmationView(
 
 
 
-        result_output = "\n".join(
-            str(r)
-            for r in results
+        output = "\n".join(
+            str(result)
+            for result in results
         )
 
 
@@ -192,7 +277,7 @@ class ConfirmationView(
                 if failed == 0
                 else "⚠️ Plan partially completed"
             ),
-            description=result_output[:4000],
+            description=output[:4000],
             color=(
                 discord.Color.green()
                 if failed == 0
@@ -207,20 +292,13 @@ class ConfirmationView(
 
 
 
-        await interaction.followup.send(
-            embed=embed
-        )
-
-
-
         log_conversation(
             guild_id=self.guild.id,
             user_id=interaction.user.id,
             username=str(interaction.user),
             message="Executed AI plan",
-            response=result_output[:2000],
+            response=output[:2000],
         )
-
 
 
         log_action_history(
@@ -231,9 +309,18 @@ class ConfirmationView(
 
 
 
+        await interaction.followup.send(
+            embed=embed,
+            view=RollbackView(
+                interaction.user.id,
+                self.guild,
+            ),
+        )
+
+
+
         audit_logger.info(
-            "USER=%s (%s) | GUILD=%s | %s/%s actions | TIME=%s",
-            interaction.user,
+            "USER=%s | GUILD=%s | %s/%s actions | TIME=%s",
             interaction.user.id,
             self.guild.name,
             success,
@@ -266,10 +353,8 @@ class ConfirmationView(
 
         await interaction.response.edit_message(
             content="❌ Cancelled. No changes were made.",
-            embed=None,
             view=self,
         )
-
 
 
         log_conversation(
@@ -277,7 +362,7 @@ class ConfirmationView(
             user_id=interaction.user.id,
             username=str(interaction.user),
             message="Cancelled AI plan",
-            response="User cancelled the plan",
+            response="User cancelled plan",
         )
 
 
@@ -296,7 +381,7 @@ class AskCog(
 
     def __init__(
         self,
-        bot: commands.Bot
+        bot: commands.Bot,
     ):
 
         self.bot = bot
@@ -315,7 +400,6 @@ class AskCog(
         interaction: discord.Interaction,
         vraag: str,
     ):
-
 
 
         if interaction.guild is None:
@@ -337,10 +421,7 @@ class AskCog(
         )
 
 
-
-        if not can_use_builder(
-            member
-        ):
+        if not can_use_builder(member):
 
             await interaction.response.send_message(
                 missing_permission_message(),
@@ -354,7 +435,6 @@ class AskCog(
         bot_ok, missing = bot_has_required_permissions(
             interaction.guild
         )
-
 
 
         if not bot_ok:
@@ -385,13 +465,8 @@ class AskCog(
 
         except AIPlanError as e:
 
-            logger.exception(
-                "AI plan failed"
-            )
-
-
             await interaction.followup.send(
-                f"❌ Could not create plan: {e}"
+                f"❌ AI error: {e}"
             )
 
             return
@@ -401,16 +476,14 @@ class AskCog(
         except Exception as e:
 
             logger.exception(
-                "Unexpected error"
+                "Plan error"
             )
 
-
             await interaction.followup.send(
-                f"❌ Unexpected error: {e}"
+                f"❌ Error: {e}"
             )
 
             return
-
 
 
 
@@ -419,7 +492,9 @@ class AskCog(
         ):
 
             await interaction.followup.send(
-                f"🤔 {plan.get('clarification_question')}"
+                plan.get(
+                    "clarification_question"
+                )
             )
 
             return
@@ -431,11 +506,10 @@ class AskCog(
         ):
 
             await interaction.followup.send(
-                f"ℹ️ {plan.get('summary')}\n\nNo actions needed."
+                "ℹ️ No actions needed."
             )
 
             return
-
 
 
 
@@ -445,29 +519,24 @@ class AskCog(
         )
 
 
-
-        view = ConfirmationView(
-            interaction.user.id,
-            interaction.guild,
-            plan["actions"],
-        )
-
-
-
         await interaction.followup.send(
             embed=embed,
-            view=view,
+            view=ConfirmationView(
+                interaction.user.id,
+                interaction.guild,
+                plan["actions"],
+            ),
         )
 
 
 
 # =====================================
-# EXTENSION SETUP
+# SETUP
 # =====================================
 
 
 async def setup(
-    bot: commands.Bot
+    bot: commands.Bot,
 ):
 
     await bot.add_cog(
