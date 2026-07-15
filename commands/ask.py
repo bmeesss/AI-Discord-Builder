@@ -12,6 +12,17 @@ Flow:
 6. User confirms
 7. Execute actions
 8. Save results + history
+
+Note:
+- executor.py is ONLY responsible for executing actions against Discord.
+  It does not (and should not) write to the database.
+- commands/ask.py is the single source of truth for Supabase action
+  history. History is written exactly once, using the *result* of
+  execute_plan() (ActionResult.action), since executor.py enriches
+  the action dict with rollback data (message_id, channel_id, created
+  role/channel ids, etc.) while it runs. Using the results instead of
+  the original AI-generated actions avoids saving stale/duplicate
+  entries.
 """
 
 import json
@@ -26,7 +37,7 @@ import config
 
 from ai.client import AIClient, AIPlanError
 from builder.context import get_server_context
-from builder.executor import execute_plan
+from builder.executor import execute_plan, ActionResult
 from builder.history import add_action
 
 from database.conversations import save_conversation
@@ -76,25 +87,44 @@ def _log_conversation(
 def _log_action_history(
     guild_id: int,
     user_id: int,
-    actions: list[dict],
+    results: list[ActionResult],
 ) -> None:
-    """Store every executed action so plans can be rolled back later.
+    """Store executed actions so plans can be rolled back later.
+
+    IMPORTANT: this takes the ActionResult list returned by
+    execute_plan(), NOT the original AI-generated action list.
+    executor.py enriches each action dict in-place with rollback data
+    (message_id, channel_id, created category/role ids, ...) while it
+    runs, so ActionResult.action is the only reliable, up-to-date
+    representation of what actually happened.
+
+    Only successful actions are persisted: a failed action never
+    touched the server, so there is nothing to roll back and saving
+    it would just pollute the history table.
 
     Each action is saved independently: one failing insert never
-    blocks the rest of the history.
+    blocks the rest of the history, and a database error here can
+    never crash the bot.
+
+    This is the ONLY place in the codebase that should write to the
+    actions history table. Do not call add_action() anywhere else
+    (e.g. executor.py), or duplicates will come back.
     """
-    for action in actions:
+    for result in results:
+        if not result.success:
+            continue
+
         try:
             add_action(
                 guild_id=guild_id,
-                action=action,
+                action=result.action,
                 user_id=user_id,
             )
         except Exception:
             logger.warning(
                 "Could not save action history (guild=%s, action=%s)",
                 guild_id,
-                action.get("type"),
+                result.action.get("type"),
                 exc_info=True,
             )
 
@@ -286,11 +316,16 @@ class ConfirmationView(discord.ui.View):
             response=result_output[:2000],
         )
 
-        # Save action history for rollback
+        # Save action history for rollback.
+        # Uses `results` (ActionResult list from execute_plan), which
+        # carries the enriched action data (message_id, channel_id,
+        # created ids, ...). This is the single, only place actions
+        # are persisted — do not add another add_action() call
+        # anywhere else, or duplicates will reappear.
         _log_action_history(
             guild_id=self.guild.id,
             user_id=interaction.user.id,
-            actions=self.actions,
+            results=results,
         )
 
         audit_logger.info(
