@@ -9,6 +9,7 @@ Finds:
 - Roles
 
 Supports:
+- Discord IDs
 - Emojis
 - #channel mentions
 - Different spacing
@@ -22,7 +23,15 @@ import unicodedata
 import discord
 
 
-def simplify_name(name: str) -> str:
+
+# =========================
+# NAME CLEANING
+# =========================
+
+
+def simplify_name(
+    name: str
+) -> str:
     """
     Makes Discord names easier to compare.
 
@@ -35,30 +44,40 @@ def simplify_name(name: str) -> str:
     if not name:
         return ""
 
-    name = name.lower().strip()
 
-    # Remove channel mention format
+    name = str(name).lower().strip()
+
+
+    # Discord mentions
     name = re.sub(
         r"<[#&]?\d+>",
         "",
         name
     )
 
-    # Remove #
-    name = name.replace("#", "")
 
-    # Normalize unicode
+    # Remove #
+    name = name.replace(
+        "#",
+        ""
+    )
+
+
+    # Unicode normalize
     name = unicodedata.normalize(
         "NFKD",
         name
     )
 
-    # Remove emojis/symbols
+
+    # Remove emojis and symbols
     name = "".join(
         char
         for char in name
-        if unicodedata.category(char)[0] not in ("S", "C")
+        if unicodedata.category(char)[0]
+        not in ("S", "C")
     )
+
 
     # Replace separators
     name = re.sub(
@@ -67,6 +86,7 @@ def simplify_name(name: str) -> str:
         name
     )
 
+
     # Remove extra spaces
     name = re.sub(
         r"\s+",
@@ -74,20 +94,43 @@ def simplify_name(name: str) -> str:
         name
     )
 
+
     return name.strip()
 
+
+
+
+
+# =========================
+# MATCHING
+# =========================
 
 
 def match_score(
     search: str,
     target: str
 ) -> int:
+    """
+    Calculates similarity score.
 
-    search = simplify_name(search)
-    target = simplify_name(target)
+    100 = exact
+    80  = starts with
+    60  = contains
+    40+ = word match
+    """
+
+    search = simplify_name(
+        search
+    )
+
+    target = simplify_name(
+        target
+    )
+
 
     if not search or not target:
         return 0
+
 
 
     # Exact match
@@ -95,14 +138,17 @@ def match_score(
         return 100
 
 
+
     # Target starts with search
     if target.startswith(search):
         return 80
 
 
+
     # Search inside target
     if search in target:
         return 60
+
 
 
     # Word matching
@@ -114,16 +160,28 @@ def match_score(
         target.split()
     )
 
+
     matches = len(
         search_words & target_words
     )
 
+
     if matches:
-        return 40 + (matches * 5)
+
+        return 40 + (
+            matches * 5
+        )
 
 
     return 0
 
+
+
+
+
+# =========================
+# CHANNEL FINDER
+# =========================
 
 
 def find_channel(
@@ -131,11 +189,36 @@ def find_channel(
     name: str
 ):
     """
-    Finds the best matching channel.
+    Finds best matching channel.
+
+    Supports:
+    - Channel names
+    - #mentions
+    - Discord channel IDs
+    - Emoji names
     """
+
+    if not name:
+        return None
+
+
+
+    # Discord ID support
+
+    if str(name).isdigit():
+
+        channel = guild.get_channel(
+            int(name)
+        )
+
+        if channel:
+            return channel
+
+
 
     best = None
     highest_score = 0
+
 
 
     for channel in guild.channels:
@@ -145,12 +228,17 @@ def find_channel(
             channel.name
         )
 
+
         if score > highest_score:
+
             highest_score = score
             best = channel
 
 
+
     return best
+
+
 
 
 
@@ -158,18 +246,24 @@ def find_text_channel(
     guild: discord.Guild,
     name: str
 ):
+
     channel = find_channel(
         guild,
         name
     )
 
+
     if isinstance(
         channel,
         discord.TextChannel
     ):
+
         return channel
 
+
     return None
+
+
 
 
 
@@ -177,19 +271,30 @@ def find_voice_channel(
     guild: discord.Guild,
     name: str
 ):
+
     channel = find_channel(
         guild,
         name
     )
 
+
     if isinstance(
         channel,
         discord.VoiceChannel
     ):
+
         return channel
+
 
     return None
 
+
+
+
+
+# =========================
+# CATEGORY FINDER
+# =========================
 
 
 def find_category(
@@ -200,8 +305,30 @@ def find_category(
     Finds best matching category.
     """
 
+
+    if not name:
+        return None
+
+
+
+    if str(name).isdigit():
+
+        category = guild.get_channel(
+            int(name)
+        )
+
+        if isinstance(
+            category,
+            discord.CategoryChannel
+        ):
+
+            return category
+
+
+
     best = None
     highest_score = 0
+
 
 
     for category in guild.categories:
@@ -211,13 +338,23 @@ def find_category(
             category.name
         )
 
+
         if score > highest_score:
+
             highest_score = score
             best = category
 
 
+
     return best
 
+
+
+
+
+# =========================
+# ROLE FINDER
+# =========================
 
 
 def find_role(
@@ -226,22 +363,48 @@ def find_role(
 ):
     """
     Finds best matching role.
+
+    Supports:
+    - Names
+    - IDs
     """
+
+
+    if not name:
+        return None
+
+
+
+    if str(name).isdigit():
+
+        role = guild.get_role(
+            int(name)
+        )
+
+        if role:
+            return role
+
+
 
     best = None
     highest_score = 0
 
 
+
     for role in guild.roles:
+
 
         score = match_score(
             name,
             role.name
         )
 
+
         if score > highest_score:
+
             highest_score = score
             best = role
+
 
 
     return best
