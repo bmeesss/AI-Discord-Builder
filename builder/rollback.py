@@ -2,6 +2,15 @@
 builder/rollback.py
 
 Handles undoing previous AI Discord Builder actions.
+
+Supported:
+- Delete created channels
+- Restore renamed channels
+- Delete created categories
+- Restore renamed categories
+- Delete created roles
+- Restore renamed roles
+- Delete sent messages
 """
 
 import asyncio
@@ -10,6 +19,7 @@ import logging
 import discord
 
 from builder import history
+
 from builder.finder import (
     find_channel,
     find_role,
@@ -23,6 +33,8 @@ logger = logging.getLogger(
 
 
 
+
+
 class RollbackResult:
 
     def __init__(
@@ -30,8 +42,10 @@ class RollbackResult:
         success: bool,
         detail: str
     ):
+
         self.success = success
         self.detail = detail
+
 
 
     def __str__(self):
@@ -44,10 +58,13 @@ class RollbackResult:
 
 
 
-async def safe_discord_action(coro):
 
+
+async def safe_discord_action(
+    coro
+):
     """
-    Prevent infinite waiting on Discord API.
+    Prevent Discord API calls from hanging forever.
     """
 
     try:
@@ -57,11 +74,15 @@ async def safe_discord_action(coro):
             timeout=10
         )
 
+
     except asyncio.TimeoutError:
 
         raise Exception(
             "Discord API timeout"
         )
+
+
+
 
 
 
@@ -88,7 +109,9 @@ async def rollback_actions(
         ]
 
 
+
     results = []
+
 
 
     for entry in reversed(actions):
@@ -118,6 +141,7 @@ async def rollback_actions(
         )
 
 
+
     history.remove_last_actions(
         guild.id,
         amount
@@ -125,6 +149,8 @@ async def rollback_actions(
 
 
     return results
+
+
 
 
 
@@ -139,6 +165,11 @@ async def rollback_single_action(
         "type"
     )
 
+
+
+    # =====================
+    # CHANNELS
+    # =====================
 
 
     if action_type == "create_channel":
@@ -157,6 +188,7 @@ async def rollback_single_action(
             )
 
 
+
         await safe_discord_action(
             channel.delete(
                 reason="AI rollback"
@@ -168,6 +200,8 @@ async def rollback_single_action(
             True,
             f"Deleted #{action['name']}"
         )
+
+
 
 
 
@@ -188,6 +222,7 @@ async def rollback_single_action(
             )
 
 
+
         await safe_discord_action(
             channel.edit(
                 name=action["old_name"],
@@ -202,6 +237,14 @@ async def rollback_single_action(
         )
 
 
+
+
+
+
+
+    # =====================
+    # CATEGORIES
+    # =====================
 
 
     if action_type == "create_category":
@@ -220,6 +263,7 @@ async def rollback_single_action(
             )
 
 
+
         await safe_discord_action(
             category.delete(
                 reason="AI rollback"
@@ -231,6 +275,9 @@ async def rollback_single_action(
             True,
             "Category deleted"
         )
+
+
+
 
 
 
@@ -251,6 +298,7 @@ async def rollback_single_action(
             )
 
 
+
         await safe_discord_action(
             category.edit(
                 name=action["old_name"],
@@ -265,6 +313,14 @@ async def rollback_single_action(
         )
 
 
+
+
+
+
+
+    # =====================
+    # ROLES
+    # =====================
 
 
     if action_type == "create_role":
@@ -283,6 +339,7 @@ async def rollback_single_action(
             )
 
 
+
         await safe_discord_action(
             role.delete(
                 reason="AI rollback"
@@ -294,6 +351,9 @@ async def rollback_single_action(
             True,
             "Role deleted"
         )
+
+
+
 
 
 
@@ -314,6 +374,7 @@ async def rollback_single_action(
             )
 
 
+
         await safe_discord_action(
             role.edit(
                 name=action["old_name"],
@@ -330,6 +391,14 @@ async def rollback_single_action(
 
 
 
+
+
+
+    # =====================
+    # MESSAGE ROLLBACK
+    # =====================
+
+
     if action_type == "send_message":
 
         message_id = action.get(
@@ -341,17 +410,29 @@ async def rollback_single_action(
         )
 
 
+
+        if not message_id or not channel_id:
+
+            return RollbackResult(
+                False,
+                "Missing message information"
+            )
+
+
+
         channel = guild.get_channel(
             channel_id
         )
+
 
 
         if not channel:
 
             return RollbackResult(
                 False,
-                "Channel missing"
+                "Message channel missing"
             )
+
 
 
         try:
@@ -363,17 +444,18 @@ async def rollback_single_action(
             )
 
 
+            # FIX:
+            # PartialMessage does not support reason=
             await safe_discord_action(
-                message.delete(
-                    reason="AI rollback"
-                )
+                message.delete()
             )
 
 
             return RollbackResult(
                 True,
-                "Message deleted"
+                f"Deleted message in #{channel.name}"
             )
+
 
 
         except discord.NotFound:
@@ -382,6 +464,19 @@ async def rollback_single_action(
                 False,
                 "Message already deleted"
             )
+
+
+
+        except discord.Forbidden:
+
+            return RollbackResult(
+                False,
+                "Missing permission to delete message"
+            )
+
+
+
+
 
 
 
