@@ -16,16 +16,16 @@ Flow:
 Note:
 - executor.py is ONLY responsible for executing actions against Discord.
   It does not (and should not) write to the database.
-- commands/ask.py is the single source of truth for Supabase action
-  history. History is written exactly once, using the *result* of
-  execute_plan() (ActionResult.action), since executor.py enriches
-  the action dict with rollback data (message_id, channel_id, created
-  role/channel ids, etc.) while it runs. Using the results instead of
-  the original AI-generated actions avoids saving stale/duplicate
-  entries.
+- Conversation logging, action-history logging, and AI plan building
+  live in builder/flow.py so /ask and other entry points (e.g. an
+  @mention handler) share exactly the same behavior. History is
+  written exactly once, using the *result* of execute_plan()
+  (ActionResult.action), since executor.py enriches the action dict
+  with rollback data (message_id, channel_id, created role/channel
+  ids, etc.) while it runs. Using the results instead of the original
+  AI-generated actions avoids saving stale/duplicate entries.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 
@@ -33,14 +33,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import config
-
-from ai.client import AIClient, AIPlanError
-from builder.context import get_server_context
+from ai.client import AIPlanError
 from builder.executor import execute_plan, ActionResult
-from builder.history import add_action
-
-from database.conversations import save_conversation
+from builder.flow import build_plan, format_plan_embed, _log_conversation, _log_action_history
 
 from security.permissions import (
     bot_has_required_permissions,
@@ -50,167 +45,6 @@ from security.permissions import (
 
 logger = logging.getLogger("ai_discord_builder.ask")
 audit_logger = logging.getLogger("ai_discord_builder.audit")
-
-
-# =========================
-# DATABASE LOGGING HELPERS
-# =========================
-
-def _log_conversation(
-    guild_id: int,
-    user_id: int,
-    username: str,
-    message: str,
-    response: str,
-) -> None:
-    """Save a conversation row to Supabase.
-
-    Database failures are logged but never break the Discord flow.
-    """
-    try:
-        save_conversation(
-            guild_id=guild_id,
-            user_id=user_id,
-            username=username,
-            message=message,
-            response=response,
-        )
-    except Exception:
-        logger.warning(
-            "Could not save conversation (guild=%s, user=%s)",
-            guild_id,
-            user_id,
-            exc_info=True,
-        )
-
-
-def _log_action_history(
-    guild_id: int,
-    user_id: int,
-    results: list[ActionResult],
-) -> None:
-    """Store executed actions so plans can be rolled back later.
-
-    IMPORTANT: this takes the ActionResult list returned by
-    execute_plan(), NOT the original AI-generated action list.
-    executor.py enriches each action dict in-place with rollback data
-    (message_id, channel_id, created category/role ids, ...) while it
-    runs, so ActionResult.action is the only reliable, up-to-date
-    representation of what actually happened.
-
-    Only successful actions are persisted: a failed action never
-    touched the server, so there is nothing to roll back and saving
-    it would just pollute the history table.
-
-    Each action is saved independently: one failing insert never
-    blocks the rest of the history, and a database error here can
-    never crash the bot.
-
-    This is the ONLY place in the codebase that should write to the
-    actions history table. Do not call add_action() anywhere else
-    (e.g. executor.py), or duplicates will come back.
-    """
-    for result in results:
-        if not result.success:
-            continue
-
-        try:
-            add_action(
-                guild_id=guild_id,
-                action=result.action,
-                user_id=user_id,
-            )
-        except Exception:
-            logger.warning(
-                "Could not save action history (guild=%s, action=%s)",
-                guild_id,
-                result.action.get("type"),
-                exc_info=True,
-            )
-
-
-# =========================
-# PLAN EMBED
-# =========================
-
-def format_plan_embed(summary: str, actions: list[dict]) -> discord.Embed:
-    embed = discord.Embed(
-        title="🤖 AI Server Builder — Proposed Plan",
-        description=summary,
-        color=discord.Color.blurple(),
-    )
-
-    categories = [
-        a["name"]
-        for a in actions
-        if a["type"] == "create_category"
-    ]
-
-    channels = [
-        a
-        for a in actions
-        if a["type"] == "create_channel"
-    ]
-
-    roles = [
-        a
-        for a in actions
-        if a["type"] == "create_role"
-    ]
-
-    other = [
-        a
-        for a in actions
-        if a["type"] not in ("create_category", "create_channel", "create_role")
-    ]
-
-    if categories:
-        embed.add_field(
-            name="📁 Categories",
-            value="\n".join(f"- {x}" for x in categories),
-            inline=False,
-        )
-
-    if channels:
-        lines = []
-
-        for channel in channels:
-            icon = (
-                "🔊"
-                if channel.get("channel_type") == "voice"
-                else "💬"
-            )
-
-            category = ""
-
-            if channel.get("category"):
-                category = f" ({channel['category']})"
-
-            lines.append(f"{icon} #{channel['name']}{category}")
-
-        embed.add_field(
-            name="Channels",
-            value="\n".join(lines),
-            inline=False,
-        )
-
-    if roles:
-        embed.add_field(
-            name="🎭 Roles",
-            value="\n".join(f"- {r['name']}" for r in roles),
-            inline=False,
-        )
-
-    if other:
-        embed.add_field(
-            name="Other",
-            value="\n".join(f"- {x['type']}" for x in other),
-            inline=False,
-        )
-
-    embed.set_footer(text=f"{len(actions)} action(s) • Confirm?")
-
-    return embed
 
 
 # =========================
@@ -270,7 +104,6 @@ class ConfirmationView(discord.ui.View):
         except Exception as e:
             logger.exception("Execution failed")
 
-            # Save failed execution in Supabase
             _log_conversation(
                 guild_id=self.guild.id,
                 user_id=interaction.user.id,
@@ -307,7 +140,6 @@ class ConfirmationView(discord.ui.View):
 
         await interaction.followup.send(embed=embed)
 
-        # Save execution result in Supabase
         _log_conversation(
             guild_id=self.guild.id,
             user_id=interaction.user.id,
@@ -359,7 +191,6 @@ class ConfirmationView(discord.ui.View):
             view=self,
         )
 
-        # Save cancellation in Supabase
         _log_conversation(
             guild_id=self.guild.id,
             user_id=interaction.user.id,
@@ -379,7 +210,6 @@ class AskCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.ai_client = AIClient()
 
     @app_commands.command(
         name="ask",
@@ -433,36 +263,14 @@ class AskCog(commands.Cog):
         # AI PLAN
         # -------------------------
         try:
-            server_context = get_server_context(interaction.guild)
-
-            plan = await self.ai_client.generate_plan(vraag, server_context)
-
-            # Save AI conversation: question + full plan as JSON
-            try:
-                plan_response = json.dumps(plan, indent=2, default=str)
-            except (TypeError, ValueError):
-                plan_response = str(plan)
-
-            _log_conversation(
-                guild_id=interaction.guild.id,
-                user_id=interaction.user.id,
-                username=str(interaction.user),
-                message=vraag,
-                response=plan_response,
+            plan = await build_plan(
+                guild=interaction.guild,
+                user=interaction.user,
+                prompt=vraag,
             )
 
         except AIPlanError as e:
             logger.exception("AI plan failed")
-
-            # Save failed AI call in Supabase
-            _log_conversation(
-                guild_id=interaction.guild.id,
-                user_id=interaction.user.id,
-                username=str(interaction.user),
-                message=vraag,
-                response=f"ERROR: {e}",
-            )
-
             await interaction.followup.send(f"❌ Could not create plan: {e}")
             return
 
