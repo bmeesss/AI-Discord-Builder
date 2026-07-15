@@ -36,7 +36,6 @@ def run_web():
     )
 
 
-
 threading.Thread(
     target=run_web,
     daemon=True
@@ -88,13 +87,11 @@ if not root_logger.handlers:
         encoding="utf-8"
     )
 
-
     file_handler.setFormatter(
         logging.Formatter(
             "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
         )
     )
-
 
     root_logger.addHandler(
         file_handler
@@ -142,24 +139,38 @@ async def on_ready():
 
     try:
 
-        commands_loaded = [
-            command.name
-            for command in bot.tree.get_commands()
-        ]
+        logger.info(
+            "Loaded commands: %s",
+            [
+                cmd.name
+                for cmd in bot.tree.get_commands()
+            ]
+        )
+
+
+        # =========================
+        # REMOVE OLD GLOBAL COMMANDS
+        # =========================
+
+        bot.tree.clear_commands(
+            guild=None
+        )
+
+
+        await bot.tree.sync()
 
 
         logger.info(
-            "Registered slash commands: %s",
-            commands_loaded
+            "Removed old global commands"
         )
 
 
 
-        # Sync commands per server
-        # Hierdoor verschijnen commands direct
+        # =========================
+        # GUILD SYNC
+        # =========================
 
         for guild in bot.guilds:
-
 
             bot.tree.copy_global_to(
                 guild=guild
@@ -172,7 +183,7 @@ async def on_ready():
 
 
             logger.info(
-                "Synced %d guild command(s) naar %s",
+                "Synced %d command(s) naar %s",
                 len(synced),
                 guild.name
             )
