@@ -10,19 +10,30 @@ import logging
 import discord
 
 from builder import categories, channels, roles
+from builder.finder import find_channel
 
 logger = logging.getLogger("ai_discord_builder.executor")
 
 
 class ActionResult:
-    def __init__(self, action: dict, success: bool, detail: str):
+
+    def __init__(
+        self,
+        action: dict,
+        success: bool,
+        detail: str
+    ):
         self.action = action
         self.success = success
         self.detail = detail
 
+
     def __str__(self):
+
         icon = "✅" if self.success else "❌"
+
         return f"{icon} {self.detail}"
+
 
 
 async def execute_plan(
@@ -32,10 +43,14 @@ async def execute_plan(
 
     results = []
 
+
     for action in actions:
+
         action_type = action.get("type")
 
+
         try:
+
             result = await _execute_single_action(
                 guild,
                 action
@@ -43,7 +58,9 @@ async def execute_plan(
 
             results.append(result)
 
+
         except discord.Forbidden:
+
             results.append(
                 ActionResult(
                     action,
@@ -52,7 +69,9 @@ async def execute_plan(
                 )
             )
 
+
         except discord.HTTPException as e:
+
             results.append(
                 ActionResult(
                     action,
@@ -61,7 +80,9 @@ async def execute_plan(
                 )
             )
 
+
         except Exception as e:
+
             results.append(
                 ActionResult(
                     action,
@@ -75,7 +96,11 @@ async def execute_plan(
                 action
             )
 
+
     return results
+
+
+
 
 
 async def _execute_single_action(
@@ -83,12 +108,15 @@ async def _execute_single_action(
     action: dict
 ) -> ActionResult:
 
+
     action_type = action["type"]
+
 
 
     # =========================
     # CATEGORY ACTIONS
     # =========================
+
 
     if action_type == "create_category":
 
@@ -97,11 +125,13 @@ async def _execute_single_action(
             action["name"]
         )
 
+
         return ActionResult(
             action,
             True,
             f"Category **{category.name}** created (or already existed)"
         )
+
 
 
     if action_type == "rename_category":
@@ -112,12 +142,15 @@ async def _execute_single_action(
             action["new_name"]
         )
 
+
         if ok:
+
             return ActionResult(
                 action,
                 True,
                 f"Category **{action['old_name']}** renamed to **{action['new_name']}**"
             )
+
 
         return ActionResult(
             action,
@@ -126,11 +159,17 @@ async def _execute_single_action(
         )
 
 
+
+
+
     # =========================
     # CHANNEL ACTIONS
     # =========================
 
+
+
     if action_type == "create_channel":
+
 
         channel = await channels.create_channel(
             guild,
@@ -142,6 +181,7 @@ async def _execute_single_action(
             )
         )
 
+
         return ActionResult(
             action,
             True,
@@ -149,7 +189,11 @@ async def _execute_single_action(
         )
 
 
+
+
+
     if action_type == "rename_channel":
+
 
         ok = await channels.rename_channel(
             guild,
@@ -157,12 +201,15 @@ async def _execute_single_action(
             action["new_name"]
         )
 
+
         if ok:
+
             return ActionResult(
                 action,
                 True,
                 f"Channel **{action['old_name']}** renamed to **{action['new_name']}**"
             )
+
 
         return ActionResult(
             action,
@@ -171,19 +218,26 @@ async def _execute_single_action(
         )
 
 
+
+
+
     if action_type == "delete_channel":
+
 
         ok = await channels.delete_channel(
             guild,
             action["name"]
         )
 
+
         if ok:
+
             return ActionResult(
                 action,
                 True,
                 f"Channel **{action['name']}** deleted"
             )
+
 
         return ActionResult(
             action,
@@ -192,7 +246,11 @@ async def _execute_single_action(
         )
 
 
+
+
+
     if action_type == "move_channel":
+
 
         ok = await channels.move_channel(
             guild,
@@ -200,12 +258,15 @@ async def _execute_single_action(
             action["target_category"]
         )
 
+
         if ok:
+
             return ActionResult(
                 action,
                 True,
                 f"Channel **{action['name']}** moved to **{action['target_category']}**"
             )
+
 
         return ActionResult(
             action,
@@ -214,11 +275,69 @@ async def _execute_single_action(
         )
 
 
+
+
+
+    # =========================
+    # MESSAGE ACTIONS
+    # =========================
+
+
+    if action_type == "send_message":
+
+
+        channel = find_channel(
+            guild,
+            action["channel"]
+        )
+
+
+        if not channel:
+
+            return ActionResult(
+                action,
+                False,
+                f"Channel **{action['channel']}** not found"
+            )
+
+
+
+        if not isinstance(
+            channel,
+            discord.TextChannel
+        ):
+
+            return ActionResult(
+                action,
+                False,
+                f"Channel **{channel.name}** is not a text channel"
+            )
+
+
+
+        await channel.send(
+            action["content"]
+        )
+
+
+        return ActionResult(
+            action,
+            True,
+            f"Message sent in **#{channel.name}**"
+        )
+
+
+
+
+
     # =========================
     # ROLE ACTIONS
     # =========================
 
+
+
     if action_type == "create_role":
+
 
         role = await roles.create_role(
             guild,
@@ -238,6 +357,7 @@ async def _execute_single_action(
             )
         )
 
+
         return ActionResult(
             action,
             True,
@@ -245,7 +365,11 @@ async def _execute_single_action(
         )
 
 
+
+
+
     if action_type == "rename_role":
+
 
         ok = await roles.rename_role(
             guild,
@@ -253,12 +377,15 @@ async def _execute_single_action(
             action["new_name"]
         )
 
+
         if ok:
+
             return ActionResult(
                 action,
                 True,
                 f"Role **{action['old_name']}** renamed to **{action['new_name']}**"
             )
+
 
         return ActionResult(
             action,
@@ -267,25 +394,35 @@ async def _execute_single_action(
         )
 
 
+
+
+
     if action_type == "delete_role":
+
 
         ok = await roles.delete_role(
             guild,
             action["name"]
         )
 
+
         if ok:
+
             return ActionResult(
                 action,
                 True,
                 f"Role **{action['name']}** deleted"
             )
 
+
         return ActionResult(
             action,
             False,
             f"Role **{action['name']}** not found"
         )
+
+
+
 
 
     return ActionResult(
