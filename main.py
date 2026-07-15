@@ -25,7 +25,7 @@ from web.app import app
 
 
 # =========================
-# FLASK WEB SERVER
+# FLASK
 # =========================
 
 def run_web():
@@ -43,43 +43,38 @@ threading.Thread(
 
 
 
-
-
 # =========================
 # LOGGING
 # =========================
 
 os.makedirs(
-    os.path.dirname(
-        config.LOG_FILE_PATH
-    ) or ".",
+    os.path.dirname(config.LOG_FILE_PATH) or ".",
     exist_ok=True
 )
 
 
-root_logger = logging.getLogger(
+logger_root = logging.getLogger(
     "ai_discord_builder"
 )
 
-root_logger.setLevel(
+logger_root.setLevel(
     logging.INFO
 )
 
 
-if not root_logger.handlers:
+if not logger_root.handlers:
 
-    console_handler = logging.StreamHandler()
+    handler = logging.StreamHandler()
 
-    console_handler.setFormatter(
+    handler.setFormatter(
         logging.Formatter(
             "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
         )
     )
 
-    root_logger.addHandler(
-        console_handler
+    logger_root.addHandler(
+        handler
     )
-
 
 
     file_handler = logging.FileHandler(
@@ -93,10 +88,9 @@ if not root_logger.handlers:
         )
     )
 
-    root_logger.addHandler(
+    logger_root.addHandler(
         file_handler
     )
-
 
 
 logger = logging.getLogger(
@@ -105,17 +99,14 @@ logger = logging.getLogger(
 
 
 
-
-
 # =========================
-# DISCORD BOT
+# BOT
 # =========================
 
 intents = discord.Intents.default()
 
 intents.guilds = True
 intents.members = True
-
 
 
 bot = commands.Bot(
@@ -125,78 +116,49 @@ bot = commands.Bot(
 
 
 
-
+# =========================
+# READY
+# =========================
 
 @bot.event
 async def on_ready():
 
     logger.info(
-        "Logged in as %s (ID: %s)",
-        bot.user,
-        bot.user.id
+        "Logged in as %s",
+        bot.user
+    )
+
+
+    logger.info(
+        "Loaded commands: %s",
+        [
+            cmd.name
+            for cmd in bot.tree.get_commands()
+        ]
     )
 
 
     try:
 
-        logger.info(
-            "Loaded commands: %s",
-            [
-                cmd.name
-                for cmd in bot.tree.get_commands()
-            ]
-        )
-
-
-        # =========================
-        # REMOVE OLD GLOBAL COMMANDS
-        # =========================
-
-        bot.tree.clear_commands(
-            guild=None
-        )
-
-
-        await bot.tree.sync()
-
-
-        logger.info(
-            "Removed old global commands"
-        )
-
-
-
-        # =========================
-        # GUILD SYNC
-        # =========================
-
+        # DEVELOPMENT GUILD SYNC
         for guild in bot.guilds:
-
-            bot.tree.copy_global_to(
-                guild=guild
-            )
-
 
             synced = await bot.tree.sync(
                 guild=guild
             )
 
-
             logger.info(
-                "Synced %d command(s) naar %s",
+                "Synced %s commands naar %s",
                 len(synced),
                 guild.name
             )
 
 
-
     except Exception:
 
         logger.exception(
-            "Slash command sync failed"
+            "Command sync failed"
         )
-
-
 
 
 
@@ -209,40 +171,37 @@ async def load_extensions():
     extensions = [
 
         "commands.ask",
-
         "commands.rollback"
 
     ]
 
 
-    for extension in extensions:
+    for ext in extensions:
 
         try:
 
             await bot.load_extension(
-                extension
+                ext
             )
 
 
             logger.info(
                 "Loaded extension: %s",
-                extension
+                ext
             )
 
 
         except Exception:
 
             logger.exception(
-                "Failed loading extension: %s",
-                extension
+                "Failed loading %s",
+                ext
             )
 
 
 
-
-
 # =========================
-# START BOT
+# START
 # =========================
 
 async def main():
@@ -258,8 +217,6 @@ async def main():
         await bot.start(
             config.DISCORD_TOKEN
         )
-
-
 
 
 
