@@ -1,3 +1,4 @@
+```python
 """
 builder/rollback.py
 
@@ -11,6 +12,7 @@ Supported:
 - Delete created roles
 - Restore renamed roles
 - Delete sent messages
+- Restore moved channels
 """
 
 import asyncio
@@ -32,9 +34,6 @@ logger = logging.getLogger(
 )
 
 
-
-
-
 class RollbackResult:
 
     def __init__(
@@ -42,10 +41,8 @@ class RollbackResult:
         success: bool,
         detail: str
     ):
-
         self.success = success
         self.detail = detail
-
 
 
     def __str__(self):
@@ -56,13 +53,7 @@ class RollbackResult:
 
 
 
-
-
-
-
-async def safe_discord_action(
-    coro
-):
+async def safe_discord_action(coro):
     """
     Prevent Discord API calls from hanging forever.
     """
@@ -74,17 +65,11 @@ async def safe_discord_action(
             timeout=10
         )
 
-
     except asyncio.TimeoutError:
 
         raise Exception(
             "Discord API timeout"
         )
-
-
-
-
-
 
 
 
@@ -109,9 +94,9 @@ async def rollback_actions(
         ]
 
 
-
     results = []
 
+    successful_rollbacks = 0
 
 
     for entry in reversed(actions):
@@ -122,7 +107,6 @@ async def rollback_actions(
                 guild,
                 entry["action"]
             )
-
 
         except Exception as e:
 
@@ -136,21 +120,24 @@ async def rollback_actions(
             )
 
 
-        results.append(
-            result
+        results.append(result)
+
+
+        if result.success:
+            successful_rollbacks += 1
+
+
+
+    # Remove ONLY successful rollback entries
+    if successful_rollbacks:
+
+        history.remove_last_actions(
+            guild.id,
+            successful_rollbacks
         )
 
 
-
-    history.remove_last_actions(
-        guild.id,
-        amount
-    )
-
-
     return results
-
-
 
 
 
@@ -166,7 +153,6 @@ async def rollback_single_action(
     )
 
 
-
     # =====================
     # CHANNELS
     # =====================
@@ -174,10 +160,22 @@ async def rollback_single_action(
 
     if action_type == "create_channel":
 
-        channel = find_channel(
-            guild,
-            action["name"]
-        )
+        channel = None
+
+
+        if action.get("channel_id"):
+
+            channel = guild.get_channel(
+                int(action["channel_id"])
+            )
+
+
+        if not channel:
+
+            channel = find_channel(
+                guild,
+                action.get("name")
+            )
 
 
         if not channel:
@@ -186,7 +184,6 @@ async def rollback_single_action(
                 False,
                 "Channel not found"
             )
-
 
 
         await safe_discord_action(
@@ -198,20 +195,29 @@ async def rollback_single_action(
 
         return RollbackResult(
             True,
-            f"Deleted #{action['name']}"
+            f"Deleted #{channel.name}"
         )
-
-
-
 
 
 
     if action_type == "rename_channel":
 
-        channel = find_channel(
-            guild,
-            action["new_name"]
-        )
+        channel = None
+
+
+        if action.get("channel_id"):
+
+            channel = guild.get_channel(
+                int(action["channel_id"])
+            )
+
+
+        if not channel:
+
+            channel = find_channel(
+                guild,
+                action.get("new_name")
+            )
 
 
         if not channel:
@@ -220,7 +226,6 @@ async def rollback_single_action(
                 False,
                 "Channel not found"
             )
-
 
 
         await safe_discord_action(
@@ -238,7 +243,56 @@ async def rollback_single_action(
 
 
 
+    if action_type == "move_channel":
 
+        channel = None
+
+
+        if action.get("channel_id"):
+
+            channel = guild.get_channel(
+                int(action["channel_id"])
+            )
+
+
+        if not channel:
+
+            channel = find_channel(
+                guild,
+                action.get("name")
+            )
+
+
+        if not channel:
+
+            return RollbackResult(
+                False,
+                "Channel not found"
+            )
+
+
+        category = None
+
+
+        if action.get("old_category_id"):
+
+            category = guild.get_channel(
+                int(action["old_category_id"])
+            )
+
+
+        await safe_discord_action(
+            channel.edit(
+                category=category,
+                reason="AI rollback"
+            )
+        )
+
+
+        return RollbackResult(
+            True,
+            "Channel moved back"
+        )
 
 
 
@@ -249,10 +303,22 @@ async def rollback_single_action(
 
     if action_type == "create_category":
 
-        category = find_category(
-            guild,
-            action["name"]
-        )
+        category = None
+
+
+        if action.get("category_id"):
+
+            category = guild.get_channel(
+                int(action["category_id"])
+            )
+
+
+        if not category:
+
+            category = find_category(
+                guild,
+                action.get("name")
+            )
 
 
         if not category:
@@ -261,7 +327,6 @@ async def rollback_single_action(
                 False,
                 "Category not found"
             )
-
 
 
         await safe_discord_action(
@@ -278,16 +343,24 @@ async def rollback_single_action(
 
 
 
-
-
-
-
     if action_type == "rename_category":
 
-        category = find_category(
-            guild,
-            action["new_name"]
-        )
+        category = None
+
+
+        if action.get("category_id"):
+
+            category = guild.get_channel(
+                int(action["category_id"])
+            )
+
+
+        if not category:
+
+            category = find_category(
+                guild,
+                action.get("new_name")
+            )
 
 
         if not category:
@@ -296,7 +369,6 @@ async def rollback_single_action(
                 False,
                 "Category not found"
             )
-
 
 
         await safe_discord_action(
@@ -314,10 +386,6 @@ async def rollback_single_action(
 
 
 
-
-
-
-
     # =====================
     # ROLES
     # =====================
@@ -325,10 +393,22 @@ async def rollback_single_action(
 
     if action_type == "create_role":
 
-        role = find_role(
-            guild,
-            action["name"]
-        )
+        role = None
+
+
+        if action.get("role_id"):
+
+            role = guild.get_role(
+                int(action["role_id"])
+            )
+
+
+        if not role:
+
+            role = find_role(
+                guild,
+                action.get("name")
+            )
 
 
         if not role:
@@ -337,7 +417,6 @@ async def rollback_single_action(
                 False,
                 "Role not found"
             )
-
 
 
         await safe_discord_action(
@@ -354,16 +433,24 @@ async def rollback_single_action(
 
 
 
-
-
-
-
     if action_type == "rename_role":
 
-        role = find_role(
-            guild,
-            action["new_name"]
-        )
+        role = None
+
+
+        if action.get("role_id"):
+
+            role = guild.get_role(
+                int(action["role_id"])
+            )
+
+
+        if not role:
+
+            role = find_role(
+                guild,
+                action.get("new_name")
+            )
 
 
         if not role:
@@ -372,7 +459,6 @@ async def rollback_single_action(
                 False,
                 "Role not found"
             )
-
 
 
         await safe_discord_action(
@@ -387,10 +473,6 @@ async def rollback_single_action(
             True,
             "Role restored"
         )
-
-
-
-
 
 
 
@@ -410,7 +492,6 @@ async def rollback_single_action(
         )
 
 
-
         if not message_id or not channel_id:
 
             return RollbackResult(
@@ -419,11 +500,9 @@ async def rollback_single_action(
             )
 
 
-
         channel = guild.get_channel(
-            channel_id
+            int(channel_id)
         )
-
 
 
         if not channel:
@@ -434,18 +513,15 @@ async def rollback_single_action(
             )
 
 
-
         try:
 
             message = await safe_discord_action(
                 channel.fetch_message(
-                    message_id
+                    int(message_id)
                 )
             )
 
 
-            # FIX:
-            # PartialMessage does not support reason=
             await safe_discord_action(
                 message.delete()
             )
@@ -457,14 +533,12 @@ async def rollback_single_action(
             )
 
 
-
         except discord.NotFound:
 
             return RollbackResult(
                 False,
                 "Message already deleted"
             )
-
 
 
         except discord.Forbidden:
@@ -476,11 +550,8 @@ async def rollback_single_action(
 
 
 
-
-
-
-
     return RollbackResult(
         False,
         f"Unsupported: {action_type}"
     )
+```

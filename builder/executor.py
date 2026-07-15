@@ -1,3 +1,4 @@
+```python
 """
 builder/executor.py
 
@@ -9,7 +10,12 @@ Features:
 - Create/Rename/Delete roles
 - Send messages
 
-Database history is handled by commands/ask.py
+Database history is handled by commands/ask.py.
+
+IMPORTANT:
+This file does NOT save history.
+It only enriches action dictionaries with rollback
+information before returning ActionResult objects.
 """
 
 import logging
@@ -18,7 +24,9 @@ import discord
 
 from builder import categories, channels, roles
 
-from builder.finder import find_channel
+from builder.finder import (
+    find_channel,
+)
 
 
 logger = logging.getLogger(
@@ -54,13 +62,9 @@ async def execute_plan(
 
     results = []
 
-
     for action in actions:
 
-        action_type = action.get(
-            "type"
-        )
-
+        action_type = action.get("type")
 
         try:
 
@@ -69,10 +73,7 @@ async def execute_plan(
                 action
             )
 
-
-            results.append(
-                result
-            )
+            results.append(result)
 
 
         except discord.Forbidden:
@@ -130,12 +131,15 @@ async def _execute_single_action(
     # CATEGORY ACTIONS
     # =========================
 
+
     if action_type == "create_category":
 
         category = await categories.create_category(
             guild,
             action["name"]
         )
+
+        action["category_id"] = category.id
 
 
         return ActionResult(
@@ -147,6 +151,24 @@ async def _execute_single_action(
 
 
     if action_type == "rename_category":
+
+        category = discord.utils.get(
+            guild.categories,
+            name=action["old_name"]
+        )
+
+
+        if not category:
+
+            return ActionResult(
+                action,
+                False,
+                "Category not found"
+            )
+
+
+        action["category_id"] = category.id
+
 
         ok = await categories.rename_category(
             guild,
@@ -167,7 +189,7 @@ async def _execute_single_action(
         return ActionResult(
             action,
             False,
-            "Category not found"
+            "Category rename failed"
         )
 
 
@@ -190,6 +212,16 @@ async def _execute_single_action(
         )
 
 
+        action["channel_id"] = channel.id
+
+
+        if channel.category:
+
+            action["category_id"] = (
+                channel.category.id
+            )
+
+
         return ActionResult(
             action,
             True,
@@ -199,6 +231,24 @@ async def _execute_single_action(
 
 
     if action_type == "rename_channel":
+
+        channel = find_channel(
+            guild,
+            action["old_name"]
+        )
+
+
+        if not channel:
+
+            return ActionResult(
+                action,
+                False,
+                "Channel not found"
+            )
+
+
+        action["channel_id"] = channel.id
+
 
         ok = await channels.rename_channel(
             guild,
@@ -219,7 +269,7 @@ async def _execute_single_action(
         return ActionResult(
             action,
             False,
-            "Channel not found"
+            "Rename failed"
         )
 
 
@@ -241,6 +291,9 @@ async def _execute_single_action(
             )
 
 
+        action["channel_id"] = channel.id
+
+
         await channel.delete(
             reason="AI-Discord-Builder"
         )
@@ -255,6 +308,31 @@ async def _execute_single_action(
 
 
     if action_type == "move_channel":
+
+        channel = find_channel(
+            guild,
+            action["name"]
+        )
+
+
+        if not channel:
+
+            return ActionResult(
+                action,
+                False,
+                "Channel not found"
+            )
+
+
+        action["channel_id"] = channel.id
+
+
+        if channel.category:
+
+            action["old_category_id"] = (
+                channel.category.id
+            )
+
 
         ok = await channels.move_channel(
             guild,
@@ -275,7 +353,7 @@ async def _execute_single_action(
         return ActionResult(
             action,
             False,
-            "Channel/category not found"
+            "Move failed"
         )
 
 
@@ -319,11 +397,8 @@ async def _execute_single_action(
         )
 
 
-        # Add rollback data to action object
-        # ask.py will save this later
-
-        action["message_id"] = message.id
         action["channel_id"] = channel.id
+        action["message_id"] = message.id
 
 
         return ActionResult(
@@ -360,6 +435,9 @@ async def _execute_single_action(
         )
 
 
+        action["role_id"] = role.id
+
+
         return ActionResult(
             action,
             True,
@@ -369,6 +447,24 @@ async def _execute_single_action(
 
 
     if action_type == "rename_role":
+
+        role = discord.utils.get(
+            guild.roles,
+            name=action["old_name"]
+        )
+
+
+        if not role:
+
+            return ActionResult(
+                action,
+                False,
+                "Role not found"
+            )
+
+
+        action["role_id"] = role.id
+
 
         ok = await roles.rename_role(
             guild,
@@ -389,12 +485,30 @@ async def _execute_single_action(
         return ActionResult(
             action,
             False,
-            "Role not found"
+            "Rename failed"
         )
 
 
 
     if action_type == "delete_role":
+
+        role = discord.utils.get(
+            guild.roles,
+            name=action["name"]
+        )
+
+
+        if not role:
+
+            return ActionResult(
+                action,
+                False,
+                "Role not found"
+            )
+
+
+        action["role_id"] = role.id
+
 
         ok = await roles.delete_role(
             guild,
@@ -414,7 +528,7 @@ async def _execute_single_action(
         return ActionResult(
             action,
             False,
-            "Role not found"
+            "Delete failed"
         )
 
 
@@ -424,3 +538,4 @@ async def _execute_single_action(
         False,
         f"Unknown action: {action_type}"
     )
+```
