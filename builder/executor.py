@@ -8,26 +8,22 @@ Features:
 - Create/Rename/Delete categories
 - Create/Rename/Delete roles
 - Send messages
-- Saves actions for rollback
+
+Database history is handled by commands/ask.py
 """
 
 import logging
 
 import discord
 
-from builder import categories, channels, roles, history
+from builder import categories, channels, roles
 
-from builder.finder import (
-    find_channel
-)
+from builder.finder import find_channel
 
 
 logger = logging.getLogger(
     "ai_discord_builder.executor"
 )
-
-
-
 
 
 class ActionResult:
@@ -48,29 +44,6 @@ class ActionResult:
         icon = "✅" if self.success else "❌"
 
         return f"{icon} {self.detail}"
-
-
-
-
-
-def save_history(
-    guild: discord.Guild,
-    action: dict
-):
-    """
-    Save successful action.
-    """
-
-    history.add_action(
-        guild.id,
-        action
-    )
-
-
-
-
-
-
 
 
 
@@ -95,6 +68,7 @@ async def execute_plan(
                 guild,
                 action
             )
+
 
             results.append(
                 result
@@ -144,11 +118,6 @@ async def execute_plan(
 
 
 
-
-
-
-
-
 async def _execute_single_action(
     guild: discord.Guild,
     action: dict
@@ -157,12 +126,9 @@ async def _execute_single_action(
     action_type = action["type"]
 
 
-
-
     # =========================
     # CATEGORY ACTIONS
     # =========================
-
 
     if action_type == "create_category":
 
@@ -172,19 +138,11 @@ async def _execute_single_action(
         )
 
 
-        save_history(
-            guild,
-            action
-        )
-
-
         return ActionResult(
             action,
             True,
             f"Category {category.name} created"
         )
-
-
 
 
 
@@ -199,12 +157,6 @@ async def _execute_single_action(
 
         if ok:
 
-            save_history(
-                guild,
-                action
-            )
-
-
             return ActionResult(
                 action,
                 True,
@@ -217,10 +169,6 @@ async def _execute_single_action(
             False,
             "Category not found"
         )
-
-
-
-
 
 
 
@@ -242,21 +190,11 @@ async def _execute_single_action(
         )
 
 
-        save_history(
-            guild,
-            action
-        )
-
-
         return ActionResult(
             action,
             True,
             f"Channel #{channel.name} created"
         )
-
-
-
-
 
 
 
@@ -271,12 +209,6 @@ async def _execute_single_action(
 
         if ok:
 
-            save_history(
-                guild,
-                action
-            )
-
-
             return ActionResult(
                 action,
                 True,
@@ -289,10 +221,6 @@ async def _execute_single_action(
             False,
             "Channel not found"
         )
-
-
-
-
 
 
 
@@ -318,21 +246,11 @@ async def _execute_single_action(
         )
 
 
-        save_history(
-            guild,
-            action
-        )
-
-
         return ActionResult(
             action,
             True,
             "Channel deleted"
         )
-
-
-
-
 
 
 
@@ -347,12 +265,6 @@ async def _execute_single_action(
 
         if ok:
 
-            save_history(
-                guild,
-                action
-            )
-
-
             return ActionResult(
                 action,
                 True,
@@ -365,10 +277,6 @@ async def _execute_single_action(
             False,
             "Channel/category not found"
         )
-
-
-
-
 
 
 
@@ -394,7 +302,6 @@ async def _execute_single_action(
             )
 
 
-
         if not isinstance(
             channel,
             discord.TextChannel
@@ -407,25 +314,16 @@ async def _execute_single_action(
             )
 
 
-
         message = await channel.send(
             action["content"]
         )
 
 
-        # Save rollback information separately
+        # Add rollback data to action object
+        # ask.py will save this later
 
-        history_action = action.copy()
-
-        history_action["message_id"] = message.id
-        history_action["channel_id"] = channel.id
-
-
-
-        save_history(
-            guild,
-            history_action
-        )
+        action["message_id"] = message.id
+        action["channel_id"] = channel.id
 
 
         return ActionResult(
@@ -433,12 +331,6 @@ async def _execute_single_action(
             True,
             f"Message sent in #{channel.name}"
         )
-
-
-
-
-
-
 
 
 
@@ -468,21 +360,11 @@ async def _execute_single_action(
         )
 
 
-        save_history(
-            guild,
-            action
-        )
-
-
         return ActionResult(
             action,
             True,
             f"Role {role.name} created"
         )
-
-
-
-
 
 
 
@@ -496,12 +378,6 @@ async def _execute_single_action(
 
 
         if ok:
-
-            save_history(
-                guild,
-                action
-            )
-
 
             return ActionResult(
                 action,
@@ -518,10 +394,6 @@ async def _execute_single_action(
 
 
 
-
-
-
-
     if action_type == "delete_role":
 
         ok = await roles.delete_role(
@@ -531,12 +403,6 @@ async def _execute_single_action(
 
 
         if ok:
-
-            save_history(
-                guild,
-                action
-            )
-
 
             return ActionResult(
                 action,
@@ -550,10 +416,6 @@ async def _execute_single_action(
             False,
             "Role not found"
         )
-
-
-
-
 
 
 
