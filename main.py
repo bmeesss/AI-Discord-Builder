@@ -77,7 +77,6 @@ if not root_logger.handlers:
         )
     )
 
-
     root_logger.addHandler(
         console_handler
     )
@@ -143,9 +142,7 @@ async def on_ready():
 
     try:
 
-        # Debug: toon geladen commands
-
-        commands_list = [
+        commands_loaded = [
             command.name
             for command in bot.tree.get_commands()
         ]
@@ -153,14 +150,21 @@ async def on_ready():
 
         logger.info(
             "Registered slash commands: %s",
-            commands_list
+            commands_loaded
         )
 
 
 
-        # Guild sync (direct zichtbaar)
+        # Sync commands per server
+        # Hierdoor verschijnen commands direct
 
         for guild in bot.guilds:
+
+
+            bot.tree.copy_global_to(
+                guild=guild
+            )
+
 
             synced = await bot.tree.sync(
                 guild=guild
@@ -198,7 +202,6 @@ async def load_extensions():
         "commands.rollback"
 
     ]
-
 
 
     for extension in extensions:
