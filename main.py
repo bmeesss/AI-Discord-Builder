@@ -143,13 +143,36 @@ async def on_ready():
 
     try:
 
-        synced = await bot.tree.sync()
+        # Debug: toon geladen commands
+
+        commands_list = [
+            command.name
+            for command in bot.tree.get_commands()
+        ]
 
 
         logger.info(
-            "Synced %d slash command(s)",
-            len(synced)
+            "Registered slash commands: %s",
+            commands_list
         )
+
+
+
+        # Guild sync (direct zichtbaar)
+
+        for guild in bot.guilds:
+
+            synced = await bot.tree.sync(
+                guild=guild
+            )
+
+
+            logger.info(
+                "Synced %d guild command(s) naar %s",
+                len(synced),
+                guild.name
+            )
+
 
 
     except Exception:
@@ -157,8 +180,6 @@ async def on_ready():
         logger.exception(
             "Slash command sync failed"
         )
-
-
 
 
 
@@ -177,6 +198,7 @@ async def load_extensions():
         "commands.rollback"
 
     ]
+
 
 
     for extension in extensions:
@@ -200,8 +222,6 @@ async def load_extensions():
                 "Failed loading extension: %s",
                 extension
             )
-
-
 
 
 
