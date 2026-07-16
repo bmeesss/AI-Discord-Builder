@@ -1,3 +1,4 @@
+```python
 """
 main.py
 
@@ -23,7 +24,6 @@ import config
 from web.app import app
 
 
-
 # =========================
 # FLASK WEB SERVER
 # =========================
@@ -36,14 +36,10 @@ def run_web():
     )
 
 
-
 threading.Thread(
     target=run_web,
     daemon=True
 ).start()
-
-
-
 
 
 # =========================
@@ -96,13 +92,9 @@ if not logger.handlers:
     )
 
 
-
 main_logger = logging.getLogger(
     "ai_discord_builder.main"
 )
-
-
-
 
 
 # =========================
@@ -114,15 +106,14 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 
+# Required for @mention command handler
+intents.message_content = True
 
 
 bot = commands.Bot(
     command_prefix="!",
     intents=intents
 )
-
-
-
 
 
 # =========================
@@ -138,7 +129,6 @@ async def on_ready():
         bot.user.id
     )
 
-
     main_logger.info(
         "Guilds: %s",
         [
@@ -146,7 +136,6 @@ async def on_ready():
             for guild in bot.guilds
         ]
     )
-
 
     main_logger.info(
         "Loaded commands: %s",
@@ -156,22 +145,18 @@ async def on_ready():
         ]
     )
 
-
     try:
 
         for guild in bot.guilds:
-
 
             # Kopieer globale commands naar server
             bot.tree.copy_global_to(
                 guild=guild
             )
 
-
             synced = await bot.tree.sync(
                 guild=guild
             )
-
 
             main_logger.info(
                 "Synced %s commands naar %s",
@@ -179,16 +164,11 @@ async def on_ready():
                 guild.name
             )
 
-
-
     except Exception:
 
         main_logger.exception(
             "Slash command sync failed"
         )
-
-
-
 
 
 # =========================
@@ -200,10 +180,10 @@ async def load_extensions():
     extensions = [
 
         "commands.ask",
-        "commands.rollback"
+        "commands.rollback",
+        "commands.mention",
 
     ]
-
 
     for extension in extensions:
 
@@ -213,12 +193,10 @@ async def load_extensions():
                 extension
             )
 
-
             main_logger.info(
                 "Loaded extension: %s",
                 extension
             )
-
 
         except Exception:
 
@@ -226,9 +204,6 @@ async def load_extensions():
                 "Failed loading extension: %s",
                 extension
             )
-
-
-
 
 
 # =========================
@@ -239,18 +214,13 @@ async def main():
 
     config.validate_config()
 
-
     async with bot:
 
         await load_extensions()
 
-
         await bot.start(
             config.DISCORD_TOKEN
         )
-
-
-
 
 
 if __name__ == "__main__":
@@ -258,3 +228,4 @@ if __name__ == "__main__":
     asyncio.run(
         main()
     )
+```
