@@ -4,3 +4,4 @@ __pycache__/
 logs/*.log
 .venv/
 venv/
+.continue/mcpServers/new-mcp-server.yaml
