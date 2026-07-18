@@ -261,6 +261,14 @@ class MentionCog(
         embed = format_plan_embed(
             plan["summary"],
             plan["actions"],
+            risk=plan.get(
+                "risk",
+                "low",
+            ),
+            recommendations=plan.get(
+                "recommendations",
+                [],
+            ),
         )
 
 
@@ -268,6 +276,10 @@ class MentionCog(
             message.author.id,
             message.guild,
             plan["actions"],
+            risk=plan.get(
+                "risk",
+                "low",
+            ),
         )
 
 

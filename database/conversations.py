@@ -1,11 +1,15 @@
 import logging
+import json
+from dataclasses import asdict
 
-from database.supabase import supabase
+from database.repositories.conversation_repository import ConversationRepository
 
 
 logger = logging.getLogger(
     "ai_discord_builder.conversations"
 )
+
+repository = ConversationRepository()
 
 
 
@@ -18,18 +22,20 @@ def save_conversation(
 ):
 
     try:
-
-        supabase.table(
-            "conversations"
-        ).insert(
-            {
-                "guild_id": str(guild_id),
-                "user_id": str(user_id),
-                "username": username,
-                "message": message,
-                "response": response
+        try:
+            ai_plan = json.loads(response)
+        except Exception:
+            ai_plan = {
+                "raw": response,
             }
-        ).execute()
+
+        repository.save_conversation(
+            guild_id=str(guild_id),
+            user_id=str(user_id),
+            username=username,
+            request=message,
+            ai_plan=ai_plan,
+        )
 
 
         logger.info(
@@ -52,28 +58,13 @@ def get_recent_conversations(
 ):
 
     try:
-
-        result = (
-            supabase.table(
-                "conversations"
+        return [
+            asdict(summary)
+            for summary in repository.get_summaries(
+                guild_id=str(guild_id),
+                limit=limit,
             )
-            .select("*")
-            .eq(
-                "guild_id",
-                str(guild_id)
-            )
-            .order(
-                "created_at",
-                desc=True
-            )
-            .limit(
-                limit
-            )
-            .execute()
-        )
-
-
-        return result.data
+        ]
 
 
     except Exception:

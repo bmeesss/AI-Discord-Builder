@@ -29,6 +29,9 @@ REQUIRE_ADMIN = os.getenv("REQUIRE_ADMIN", "true").lower() == "true"
 # Max aantal acties dat de AI in 1 plan mag voorstellen (veiligheidslimiet)
 MAX_ACTIONS_PER_PLAN = int(os.getenv("MAX_ACTIONS_PER_PLAN", "40"))
 
+# Max aantal keren dat de AI een ongeldig plan mag herstellen
+MAX_AI_RETRIES = int(os.getenv("MAX_AI_RETRIES", "2"))
+
 # Hoe lang (seconden) een bevestigingsknop actief blijft voordat die verloopt
 CONFIRMATION_TIMEOUT = int(os.getenv("CONFIRMATION_TIMEOUT", "120"))
 

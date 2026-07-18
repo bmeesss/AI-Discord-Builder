@@ -1,4 +1,11 @@
-from database.supabase import supabase
+from database.supabase import get_supabase
+
+
+def _client():
+    client = get_supabase()
+    if client is None:
+        raise RuntimeError("Supabase is not configured.")
+    return client
 
 
 
@@ -8,7 +15,7 @@ def add_action(
     user_id: int | None = None
 ):
 
-    supabase.table(
+    _client().table(
         "actions"
     ).insert(
         {
@@ -27,7 +34,7 @@ def get_last_actions(
 ):
 
     result = (
-        supabase.table("actions")
+        _client().table("actions")
         .select("*")
         .eq(
             "guild_id",
@@ -65,7 +72,7 @@ def remove_last_actions(
 ):
 
     rows = (
-        supabase.table("actions")
+        _client().table("actions")
         .select("id")
         .eq(
             "guild_id",
@@ -82,7 +89,7 @@ def remove_last_actions(
 
     for row in rows.data:
 
-        supabase.table(
+        _client().table(
             "actions"
         ).delete().eq(
             "id",

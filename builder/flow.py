@@ -18,15 +18,14 @@ Does NOT:
 - Handle buttons/views
 """
 
-import asyncio
 import json
 import logging
 
 import discord
 
-from ai.client import AIClient, AIPlanError
-from builder.context import get_server_context
+from ai.client import AIPlanError
 from builder.history import add_action
+from services.ai_planning_service import AIPlanningService
 
 from database.conversations import save_conversation
 
@@ -119,12 +118,21 @@ def log_action_history(
 def format_plan_embed(
     summary: str,
     actions: list[dict],
+    risk: str = "low",
+    recommendations: list[str] | None = None,
 ):
 
     embed = discord.Embed(
         title="🤖 AI Server Builder — Proposed Plan",
         description=summary,
-        color=discord.Color.blurple(),
+        color=_risk_color(risk),
+    )
+
+
+    embed.add_field(
+        name="Risk",
+        value=risk.upper(),
+        inline=False,
     )
 
 
@@ -238,12 +246,40 @@ def format_plan_embed(
 
 
 
+    if recommendations:
+
+        embed.add_field(
+            name="Recommendations",
+            value="\n".join(
+                f"- {item}"
+                for item in recommendations[:5]
+            ),
+            inline=False,
+        )
+
+
     embed.set_footer(
         text=f"{len(actions)} action(s) • Confirm?"
     )
 
 
     return embed
+
+
+def _risk_color(
+    risk: str
+):
+
+    if risk == "critical":
+        return discord.Color.red()
+
+    if risk == "high":
+        return discord.Color.orange()
+
+    if risk == "medium":
+        return discord.Color.gold()
+
+    return discord.Color.green()
 
 
 
@@ -265,47 +301,11 @@ async def build_plan(
 
 
     # -----------------------------
-    # SERVER CONTEXT
-    # -----------------------------
-
-
-    try:
-
-        logger.info(
-            "Loading server context"
-        )
-
-
-        server_context = await asyncio.to_thread(
-            get_server_context,
-            guild,
-        )
-
-
-        logger.info(
-            "Server context loaded"
-        )
-
-
-    except Exception as e:
-
-        logger.exception(
-            "Context loading failed"
-        )
-
-
-        raise Exception(
-            f"Context error: {e}"
-        )
-
-
-
-    # -----------------------------
     # AI REQUEST
     # -----------------------------
 
 
-    ai_client = AIClient()
+    planning_service = AIPlanningService()
 
 
     try:
@@ -315,31 +315,16 @@ async def build_plan(
         )
 
 
-        plan = await asyncio.wait_for(
-            ai_client.generate_plan(
-                prompt,
-                server_context,
-            ),
-            timeout=60,
+        plan = await planning_service.build_plan(
+            guild=guild,
+            user=user,
+            prompt=prompt,
         )
 
 
         logger.info(
             "AI returned plan"
         )
-
-
-    except asyncio.TimeoutError:
-
-        logger.error(
-            "AI timeout"
-        )
-
-
-        raise AIPlanError(
-            "AI request timed out"
-        )
-
 
 
     except AIPlanError:

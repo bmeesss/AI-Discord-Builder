@@ -13,44 +13,12 @@ import logging
 
 import config
 from ai.prompts import SYSTEM_PROMPT, build_user_prompt
+from ai.validation import PlanValidationError, parse_plan
 
 
 logger = logging.getLogger(
     "ai_discord_builder.ai_client"
 )
-
-
-VALID_ACTION_TYPES = {
-    "create_category",
-    "rename_category",
-
-    "create_channel",
-    "rename_channel",
-    "delete_channel",
-    "move_channel",
-
-    "send_message",
-
-    "create_role",
-    "rename_role",
-    "delete_role",
-}
-
-
-VALID_PERMISSIONS = {
-    "manage_messages",
-    "moderate_members",
-    "kick_members",
-    "ban_members",
-    "manage_channels",
-    "manage_roles",
-    "mention_everyone",
-    "view_channel",
-    "connect",
-    "speak",
-    "administrator",
-}
-
 
 
 class AIPlanError(Exception):
@@ -108,7 +76,8 @@ class AIClient:
     async def generate_plan(
         self,
         user_instruction: str,
-        server_context: str | None = None
+        server_context: str | None = None,
+        validation_errors: list[str] | None = None,
     ) -> dict:
         """
         Stuurt instructie naar AI en geeft gevalideerd plan terug.
@@ -117,7 +86,8 @@ class AIClient:
 
         user_prompt = build_user_prompt(
             user_instruction,
-            server_context
+            server_context,
+            validation_errors=validation_errors,
         )
 
 
@@ -162,9 +132,11 @@ class AIClient:
 
 
 
-        return self._parse_and_validate(
+        plan = self._parse_and_validate(
             raw_content
         )
+
+        return plan.to_legacy_dict()
 
 
 
@@ -175,7 +147,7 @@ class AIClient:
     def _parse_and_validate(
         self,
         raw_content: str
-    ) -> dict:
+    ):
 
 
         cleaned = raw_content.strip()
@@ -224,324 +196,7 @@ class AIClient:
 
 
 
-        if not isinstance(
-            data,
-            dict
-        ):
-
-            raise AIPlanError(
-                "AI response is geen JSON object."
-            )
-
-
-
-
-
-        summary = data.get(
-            "summary"
-        )
-
-
-        needs_clarification = data.get(
-            "needs_clarification",
-            False
-        )
-
-
-        clarification_question = data.get(
-            "clarification_question"
-        )
-
-
-        actions = data.get(
-            "actions",
-            []
-        )
-
-
-
-
-
-        if not isinstance(
-            summary,
-            str
-        ) or not summary:
-
-            raise AIPlanError(
-                "AI response mist een geldige summary."
-            )
-
-
-
-        if not isinstance(
-            actions,
-            list
-        ):
-
-            raise AIPlanError(
-                "AI response actions is geen lijst."
-            )
-
-
-
-
-
-        if len(actions) > config.MAX_ACTIONS_PER_PLAN:
-
-            raise AIPlanError(
-                f"AI plan bevat te veel acties ({len(actions)})."
-            )
-
-
-
-
-
-        validated_actions = []
-
-
-        for index, action in enumerate(actions):
-
-            validated_actions.append(
-                self._validate_action(
-                    action,
-                    index
-                )
-            )
-
-
-
-
-
-        return {
-            "summary": summary,
-            "needs_clarification": bool(
-                needs_clarification
-            ),
-            "clarification_question": clarification_question,
-            "actions": validated_actions,
-        }
-
-
-
-
-
-
-
-
-    def _validate_action(
-        self,
-        action: dict,
-        index: int
-    ) -> dict:
-
-
-        if not isinstance(
-            action,
-            dict
-        ):
-
-            raise AIPlanError(
-                f"Actie #{index} is geen geldig object."
-            )
-
-
-
-
-
-        action_type = action.get(
-            "type"
-        )
-
-
-
-        if action_type not in VALID_ACTION_TYPES:
-
-            raise AIPlanError(
-                f"Actie #{index} heeft onbekend type: {action_type!r}"
-            )
-
-
-
-
-
-        # =====================
-        # CREATE / DELETE
-        # =====================
-
-
-        if action_type in (
-            "create_category",
-            "create_channel",
-            "delete_channel",
-            "delete_role",
-        ):
-
-            if not action.get(
-                "name"
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index} ({action_type}) mist name."
-                )
-
-
-
-
-
-        # =====================
-        # CHANNEL TYPE
-        # =====================
-
-
-        if action_type == "create_channel":
-
-            channel_type = action.get(
-                "channel_type",
-                "text"
-            )
-
-
-            if channel_type not in (
-                "text",
-                "voice"
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index}: ongeldig channel_type."
-                )
-
-
-
-
-
-        # =====================
-        # MOVE CHANNEL
-        # =====================
-
-
-        if action_type == "move_channel":
-
-            if not action.get(
-                "name"
-            ) or not action.get(
-                "target_category"
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index} (move_channel) mist gegevens."
-                )
-
-
-
-
-
-        # =====================
-        # SEND MESSAGE
-        # =====================
-
-
-        if action_type == "send_message":
-
-
-            if not action.get(
-                "channel"
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index} (send_message) mist channel."
-                )
-
-
-
-            if not action.get(
-                "content"
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index} (send_message) mist content."
-                )
-
-
-
-
-
-        # =====================
-        # ROLES
-        # =====================
-
-
-        if action_type == "create_role":
-
-
-            if not action.get(
-                "name"
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index} (create_role) mist name."
-                )
-
-
-
-            permissions = action.get(
-                "permissions",
-                []
-            )
-
-
-            if not isinstance(
-                permissions,
-                list
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index}: permissions moet een lijst zijn."
-                )
-
-
-
-            invalid_permissions = [
-                p
-                for p in permissions
-                if p not in VALID_PERMISSIONS
-            ]
-
-
-
-            if invalid_permissions:
-
-                raise AIPlanError(
-                    f"Actie #{index}: ongeldige permissions {invalid_permissions}"
-                )
-
-
-
-
-
-        # =====================
-        # RENAME ACTIONS
-        # =====================
-
-
-        if action_type in (
-            "rename_role",
-            "rename_channel",
-            "rename_category",
-        ):
-
-
-            if not action.get(
-                "old_name"
-            ) or not action.get(
-                "new_name"
-            ):
-
-                raise AIPlanError(
-                    f"Actie #{index} ({action_type}) mist old_name of new_name."
-                )
-
-
-
-
-
-        return action
+        try:
+            return parse_plan(data)
+        except PlanValidationError as e:
+            raise AIPlanError(str(e)) from e

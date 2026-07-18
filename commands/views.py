@@ -169,6 +169,7 @@ class ConfirmationView(
         author_id: int,
         guild: discord.Guild,
         actions: list[dict],
+        risk: str = "low",
     ):
 
         super().__init__(
@@ -179,6 +180,8 @@ class ConfirmationView(
         self.author_id = author_id
         self.guild = guild
         self.actions = actions
+        self.risk = risk
+        self._risk_confirmed = False
 
 
 
@@ -225,6 +228,30 @@ class ConfirmationView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
+
+        if (
+            self.risk in ("high", "critical")
+            and not self._risk_confirmed
+        ):
+
+            self._risk_confirmed = True
+
+            await interaction.response.edit_message(
+                content=(
+                    "⚠️ This is a high-risk AI plan. Review the proposed "
+                    "changes carefully, then press Confirm again to execute."
+                    if self.risk == "high"
+                    else (
+                        "🚨 This is a CRITICAL AI plan. It may make destructive "
+                        "or dangerous changes. Press Confirm again only if you "
+                        "fully understand the risk."
+                    )
+                ),
+                view=self,
+            )
+
+            return
 
 
         for item in self.children:
