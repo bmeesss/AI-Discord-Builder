@@ -1,127 +1,236 @@
 # AI-Discord-Builder
 
-Een AI-gestuurde Discord bot waarmee gebruikers servers bouwen en beheren via
-natuurlijke taal (`/ask <vraag>`). De AI maakt een veilig, gevalideerd
-actieplan en voert dit pas uit na expliciete bevestiging via knoppen.
+AI-Discord-Builder is een AI-gestuurde Discord bot waarmee bevoegde gebruikers
+servers kunnen bouwen en beheren via natuurlijke taal (`/ask <vraag>`). De AI
+maakt een JSON-plan; de bestaande validatie, bevestigingsknoppen,
+security-checks en executor bepalen daarna of Discord-wijzigingen mogen worden
+uitgevoerd.
 
-## Projectstructuur
+Ondersteunde AI-providers:
 
-```
-AI-Discord-Builder/
-├── main.py                # Entrypoint
-├── config.py               # Environment config
-├── requirements.txt
-├── .env.example
-├── commands/
-│   └── ask.py               # /ask slash command + confirm/cancel UI
-├── ai/
-│   ├── client.py            # AI API calls + JSON validatie
-│   └── prompts.py           # System prompt / action-schema
-├── builder/
-│   ├── executor.py          # Voert gevalideerd plan uit
-│   ├── categories.py
-│   ├── channels.py
-│   └── roles.py
-├── security/
-│   └── permissions.py       # Admin-check, bot-permissie check
-└── logs/
-    └── actions.log          # Audit log (wordt aangemaakt bij eerste run)
-```
+- Groq (cloud);
+- OpenAI (cloud);
+- Ollama (optionele lokale AI).
 
-## 1. Discord bot token instellen
+Local AI is optioneel. Cloud-only installaties starten geen Ollama en downloaden
+geen lokale modellen.
 
-1. Ga naar https://discord.com/developers/applications
-2. **New Application** → geef een naam (bv. "AI Discord Builder")
-3. Ga naar **Bot** in het linkermenu → **Reset Token** → kopieer de token
-4. Zet onder **Privileged Gateway Intents**: schakel **Server Members Intent** in
-   (nodig om permissies van leden goed te lezen)
-5. Ga naar **OAuth2 → URL Generator**:
-   - Scopes: `bot`, `applications.commands`
-   - Bot permissions: `Manage Channels`, `Manage Roles`, `Send Messages`,
-     `Embed Links`, `Read Message History`
-6. Kopieer de gegenereerde URL, open die in je browser, en nodig de bot uit op
-   je server.
+## Installatie met Docker
 
-## 2. AI API instellen
-
-**Groq (aanbevolen, gratis tier beschikbaar):**
-1. Ga naar https://console.groq.com → API Keys → maak een nieuwe key
-2. Zet deze in `.env` als `GROQ_API_KEY`
-
-**OpenAI (optioneel alternatief):**
-1. Ga naar https://platform.openai.com/api-keys
-2. Zet `AI_PROVIDER=openai` en `OPENAI_API_KEY=...` in `.env`
-
-## 3. Lokaal testen
+De repository bevat een eenvoudige container-baseline. Python is dan niet nodig
+op de host.
 
 ```bash
-# Kopieer het voorbeeld-env bestand en vul je gegevens in
+git clone https://github.com/bmeesss/AI-Discord-Builder.git
+cd AI-Discord-Builder
 cp .env.example .env
-# open .env en vul DISCORD_TOKEN en GROQ_API_KEY in
-
-# Installeer dependencies
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# Start de bot
-python main.py
 ```
 
-Als alles goed gaat zie je in de console:
+Vul in `.env` minimaal in:
+
+```env
+DISCORD_TOKEN=...
+AI_PROVIDER=groq
+GROQ_API_KEY=...
 ```
-Ingelogd als AI Discord Builder#1234 (ID: ...)
-Synced X slash command(s)
+
+Start de bot:
+
+```bash
+docker compose up -d
+docker compose logs -f bot
 ```
 
-Ga naar je Discord server en typ `/ask maak een minecraft smp server`. Let op:
-het kan tot een uur duren voordat slash commands globaal zichtbaar zijn na de
-eerste sync; op de testserver waar de bot net is uitgenodigd gaat dit meestal
-binnen enkele minuten.
+De standaard Compose-configuratie voegt geen Ollama toe. De huidige
+persistentielaag blijft de optionele Supabase-adapter gebruiken; vul
+`SUPABASE_URL` en `SUPABASE_KEY` in wanneer conversation/action persistence en
+rollback via Supabase gewenst zijn.
 
-## 4. Hosten op Render
+Health endpoints:
 
-1. Push dit project naar een GitHub repository
-2. Ga naar https://dashboard.render.com → **New +** → **Background Worker**
-   (geen Web Service — deze bot luistert niet op een HTTP poort)
-3. Koppel je GitHub repo
-4. Instellingen:
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `python main.py`
-5. Onder **Environment**, voeg alle variabelen uit `.env.example` toe met je
-   echte waarden (DISCORD_TOKEN, GROQ_API_KEY, etc.)
-6. Deploy. Render herstart de bot automatisch bij een crash of nieuwe push.
+- `http://127.0.0.1:8080/healthz` — process liveness;
+- `http://127.0.0.1:8080/readyz` — Discord runtime readiness.
 
-> **Let op:** Render's gratis tier voor Background Workers kan slapen bij
-> inactiviteit op sommige planvarianten — check de huidige Render-voorwaarden
-> voor een always-on bot.
+## Cloud AI configureren
 
-## 5. Gebruik
+### Groq
 
+```env
+AI_PROVIDER=groq
+GROQ_API_KEY=...
+GROQ_MODEL=llama-3.3-70b-versatile
 ```
+
+### OpenAI
+
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Alleen de key van de gekozen provider is nodig. API keys worden niet door de
+setup-tool gevraagd, geprint of in configuratiebestanden geschreven.
+
+## Local AI met Ollama
+
+Local AI gebruikt Ollama via HTTP. De AI-provider maakt alleen een plan; hij
+krijgt geen directe toegang tot Discord API-acties. De bestaande
+`ai.validation`, confirmation flow, permissions, executor en rollback blijven
+actief.
+
+Voorbeeld voor een host-installatie:
+
+```env
+AI_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3:4b
+LOCAL_AI_MODEL=qwen3:4b
+LOCAL_AI_AUTO_SETUP=false
+LOCAL_AI_AUTO_SELECT_MODEL=true
+```
+
+Inspecteer eerst zonder wijzigingen:
+
+```bash
+python -m setup detect
+```
+
+Start daarna de interactieve setup:
+
+```bash
+python -m setup setup
+```
+
+De setup kan, na expliciete toestemming:
+
+- OS en architectuur detecteren;
+- CPU, RAM en vrije diskruimte rapporteren;
+- Docker en een GPU-tool detecteren wanneer betrouwbaar beschikbaar;
+- Ollama detecteren;
+- Ollama starten wanneer het al geïnstalleerd is;
+- Ollama op Linux, Windows of macOS installeren wanneer een ondersteunde
+  installer beschikbaar is;
+- een gekozen model downloaden;
+- een model-smoketest uitvoeren;
+- alleen local-AI-instellingen naar `.env` schrijven.
+
+De setup-tool installeert of downloadt niets in `detect`-modus. De bot zelf
+installeert nooit software bij startup.
+
+Zie [docs/local-ai.md](docs/local-ai.md) voor Docker, modelkeuze en
+troubleshooting.
+
+## Local AI in Docker
+
+Gebruik de extra Compose-overlay expliciet:
+
+```bash
+docker compose \
+  -f compose.yaml \
+  -f compose.local-ai.yaml \
+  up -d
+```
+
+Dit voegt de Ollama-container alleen in deze modus toe. Modellen worden niet in
+de bot-image geplaatst maar in het named volume `ollama_models` opgeslagen. De
+one-shot `ollama-model` service voert bij de eerste start `ollama pull` uit.
+Handmatig pullen kan ook:
+
+```bash
+docker compose \
+  -f compose.yaml \
+  -f compose.local-ai.yaml \
+  exec ollama ollama pull qwen3:4b
+```
+
+Test de lokale provider met:
+
+```bash
+docker compose \
+  -f compose.yaml \
+  -f compose.local-ai.yaml \
+  exec bot python -m setup test
+```
+
+De bot gebruikt intern `http://ollama:11434`; een host-gebaseerde setup-tool
+gebruikt `http://localhost:11434`. Het model blijft behouden bij een container
+recreate zolang `ollama_models` niet wordt verwijderd.
+
+## Discord bot configureren
+
+1. Maak een application aan via
+   [Discord Developer Portal](https://discord.com/developers/applications).
+2. Maak/reset de Bot Token en plaats deze in `.env` als `DISCORD_TOKEN`.
+3. Zet voor de mention-handler de privileged **Message Content Intent** aan.
+4. Zet **Server Members Intent** aan wanneer member-cache/permissiegedrag dat
+   vereist.
+5. Nodig de bot uit met de scopes `bot` en `applications.commands`.
+6. Geef minimaal de permissions die de gekozen actions nodig hebben, zoals
+   `Manage Channels`, `Manage Roles` en `Send Messages`.
+
+Standaard mogen alleen leden met `Administrator` de builder gebruiken:
+
+```env
+REQUIRE_ADMIN=true
+```
+
+## Gebruik
+
+```text
 /ask Maak een Minecraft SMP Discord server
-/ask maak een kanaal genaamd 67
+/ask maak een kanaal genaamd support
 /ask verwijder kanaal test
 /ask verplaats kanaal general naar community
 /ask maak een moderator rol
 ```
 
-De bot toont altijd eerst een plan met ✅ Bevestigen / ❌ Annuleren knoppen.
-Alleen na bevestiging worden er daadwerkelijk wijzigingen gemaakt.
+De bot toont eerst een plan met Confirm/Cancel. Pas na bevestiging worden
+acties uitgevoerd. High-risk en critical plannen vragen een extra bevestiging.
 
-## Uitbreidingsmogelijkheden (toekomst)
+Beschikbare commando's:
 
-- **Server templates**: voeg vooraf gedefinieerde JSON-plannen toe in
-  `ai/prompts.py` of een nieuw `templates/` bestand voor Minecraft SMP,
-  Gaming, School, YouTube, Esports, Bedrijf — en laat de AI kiezen welk
-  template het beste past, of gebruik ze als few-shot voorbeelden in de prompt.
-- **AI branding**: nieuwe actie-types zoals `set_server_description` of
-  `generate_rules_channel_content` toevoegen aan het schema + executor.
-- **Advanced mode** ("maak mijn server professioneler"): bouw een
-  `server_context` string (huidige categorieën/kanalen/rollen ophalen via
-  `guild.categories`, `guild.channels`, `guild.roles`) en geef die mee aan
-  `generate_plan()` — het schema ondersteunt dit al via de
-  `server_context` parameter in `ai/prompts.py`.
-- **Database**: voor multi-server geheugen (bv. onthouden welke templates per
-  server gebruikt zijn) kun je later SQLite of Postgres toevoegen zonder de
-  bestaande structuur te breken — de executor blijft stateless per aanroep.
+- `/ask` — maak of wijzig een serverplan;
+- mention de bot — dezelfde planning-flow;
+- `/rollback amount:<n>` — draai recente opgeslagen actions terug wanneer de
+  persistence-adapter beschikbaar is.
+
+## Lokale development en tests
+
+```bash
+python -m venv .venv
+# Linux/macOS
+source .venv/bin/activate
+# Windows: .venv\\Scripts\\activate
+pip install -r requirements-dev.txt
+python -m unittest discover -v
+pytest -q
+```
+
+De normale tests gebruiken mocks en hebben geen Ollama-server nodig. De echte
+Ollama integration test is opt-in:
+
+```bash
+RUN_OLLAMA_TESTS=1 python -m unittest \
+  tests.integration.test_ollama_integration
+```
+
+## Beveiligingsgrenzen
+
+- Discord-token en provider-keys staan alleen in environment/configuration.
+- AI-providers kunnen geen Discord API-acties uitvoeren.
+- AI-output wordt gevalideerd voordat de executor wordt aangeroepen.
+- Local AI omzeilt geen permission- of confirmation-checks.
+- Commit nooit `.env`, API keys of Ollama-modelbestanden.
+- Behandel lokaal opgeslagen prompts, memory en action history als gevoelige
+  data.
+
+## Huidige grenzen
+
+- Ollama-installatie is best-effort en OS-afhankelijk; controleer altijd de
+  voorgestelde actie.
+- Hardwaredetectie kan geen prestaties garanderen.
+- Modelkwaliteit en JSON-betrouwbaarheid kunnen per lokaal model verschillen.
+- De bestaande database/persistence-laag blijft optioneel en vereist de huidige
+  Supabase-configuratie wanneer die functies worden gebruikt.
+- Een publiek webdashboard is nog niet geïmplementeerd.

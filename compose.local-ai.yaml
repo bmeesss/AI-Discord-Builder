@@ -1,0 +1,47 @@
+# Optional overlay. Ollama is added only when this file is explicitly used.
+# Start with:
+#   docker compose -f compose.yaml -f compose.local-ai.yaml up -d
+# The one-shot ollama-model service pulls the configured model into the named
+# volume. It is not part of the cloud-only Compose configuration.
+services:
+  bot:
+    environment:
+      AI_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-model:
+        condition: service_completed_successfully
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  ollama-model:
+    image: ollama/ollama:latest
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      MODEL: ${OLLAMA_MODEL:-qwen3:4b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull \"$${MODEL}\""]
+    volumes:
+      - ollama_models:/root/.ollama
+
+volumes:
+  ollama_models:
