@@ -36,7 +36,7 @@ class ContextIntelligenceEngine:
         self.conversation_service = conversation_service or ConversationIntelligence()
         self.template_service = template_service or TemplateService()
 
-    def build(
+    async def build(
         self,
         guild: discord.Guild,
         user: discord.abc.User | None,
@@ -96,14 +96,14 @@ class ContextIntelligenceEngine:
         )
 
         context.analysis = self.analyzer.analyze(guild)
-        context.memories = self.memory_service.get_relevant_memories(
+        context.memories = await self.memory_service.get_relevant_memories(
             guild_id=guild.id,
             user_id=user.id if user else None,
         )
-        context.conversations = self.conversation_service.get_summaries(
+        context.conversations = await self.conversation_service.get_summaries(
             guild_id=guild.id,
         )
-        context.templates = self.template_service.get_candidates(
+        context.templates = await self.template_service.get_candidates(
             guild_id=guild.id,
             user_request=user_request,
             member_count=member_count,

@@ -40,7 +40,7 @@ logger = logging.getLogger(
 # =====================================
 
 
-def log_conversation(
+async def log_conversation(
     guild_id: int,
     user_id: int,
     username: str,
@@ -56,7 +56,7 @@ def log_conversation(
 
     try:
 
-        save_conversation(
+        await save_conversation(
             guild_id=guild_id,
             user_id=user_id,
             username=username,
@@ -75,7 +75,7 @@ def log_conversation(
 
 
 
-def log_action_history(
+async def log_action_history(
     guild_id: int,
     user_id: int,
     results: list,
@@ -95,7 +95,7 @@ def log_action_history(
 
         try:
 
-            add_action(
+            await add_action(
                 guild_id=guild_id,
                 action=result.action,
                 user_id=user_id,
@@ -366,7 +366,7 @@ async def build_plan(
 
 
 
-    log_conversation(
+    await log_conversation(
         guild_id=guild.id,
         user_id=user.id,
         username=str(user),

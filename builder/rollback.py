@@ -78,7 +78,7 @@ async def rollback_actions(
     amount: int = 1
 ):
 
-    actions = history.get_last_actions(
+    actions = await history.get_last_actions(
         guild.id,
         amount
     )
@@ -131,7 +131,7 @@ async def rollback_actions(
     # Remove ONLY successful rollback entries
     if successful_rollbacks:
 
-        history.remove_last_actions(
+        await history.remove_last_actions(
             guild.id,
             successful_rollbacks
         )

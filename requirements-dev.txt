@@ -3,3 +3,5 @@ pytest>=8.0.0,<9
 pytest-asyncio>=0.23.0,<1
 pytest-cov>=5.0.0,<6
 ruff>=0.6.0,<1
+# Used by tests/test_compose_files.py for static Compose-file validation.
+pyyaml>=6.0.0,<7

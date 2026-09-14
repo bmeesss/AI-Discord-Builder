@@ -10,12 +10,12 @@ from ai.models import ServerContext
 from services.context_intelligence import ContextIntelligenceEngine
 
 
-def build_server_context(
+async def build_server_context(
     guild: discord.Guild,
     user: discord.abc.User | None = None,
     user_request: str = "",
 ) -> ServerContext:
-    return ContextIntelligenceEngine().build(
+    return await ContextIntelligenceEngine().build(
         guild=guild,
         user=user,
         user_request=user_request,
