@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Unit tests: no external services. Integration tests live in the
+  # postgres-integration job below and are skipped here.
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 = Dockerfile runtime; 3.12 = common host version.
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Compile checks
+        run: python -m compileall -q ai builder commands database security services setup tests web config.py main.py
+
+      - name: Ruff (critical errors)
+        run: ruff check --select E9,F --exclude .venv .
+
+      - name: Unit tests (config validation included)
+        run: python -m pytest -q --ignore=tests/integration
+
+  # Static validation of both Compose configurations. Runs without a daemon.
+  docker-compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose files
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.local-ai.yaml config --quiet
+
+  # Integration tests against a real PostgreSQL service container.
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: discord_builder
+          POSTGRES_PASSWORD: discord_builder
+          POSTGRES_DB: discord_builder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U discord_builder -d discord_builder"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://discord_builder:discord_builder@localhost:5432/discord_builder
+      RUN_POSTGRES_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            python -c "import socket; s=socket.create_connection(('localhost', 5432), 1); s.close()" && exit 0
+            sleep 1
+          done
+          echo "PostgreSQL did not become reachable" && exit 1
+
+      - name: Migrations run via CLI (fresh database)
+        run: python -m database migrate
+
+      - name: Migration status is clean afterwards
+        run: python -m database status
+
+      - name: PostgreSQL integration tests (repositories, isolation, persistence, startup/restart/recovery)
+        run: python -m pytest -q tests/integration/test_postgres_integration.py tests/integration/test_startup_flow.py
