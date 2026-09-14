@@ -1,10 +1,40 @@
-# Cloud-provider baseline. Ollama is deliberately not part of this file.
+# Self-hosting baseline: Discord bot + PostgreSQL.
+# Ollama is deliberately not part of this file (see compose.local-ai.yaml).
 # Start with: docker compose up -d
 services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-discord_builder}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-discord_builder}
+      POSTGRES_DB: ${POSTGRES_DB:-discord_builder}
+    volumes:
+      # Named volume: data survives container restart/recreate.
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   bot:
     build: .
     env_file:
       - .env
+    environment:
+      # .env values win when set; otherwise default to the local db service.
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-postgres}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://discord_builder:discord_builder@db:5432/discord_builder}
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${WEB_PORT:-8080}:8080"
+
+volumes:
+  postgres_data:

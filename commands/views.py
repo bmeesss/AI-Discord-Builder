@@ -333,7 +333,7 @@ class ConfirmationView(
 
 
 
-        log_conversation(
+        await log_conversation(
             guild_id=self.guild.id,
             user_id=interaction.user.id,
             username=str(interaction.user),
@@ -343,7 +343,7 @@ class ConfirmationView(
 
 
 
-        log_action_history(
+        await log_action_history(
             guild_id=self.guild.id,
             user_id=interaction.user.id,
             results=results,
@@ -401,7 +401,7 @@ class ConfirmationView(
 
 
 
-        log_conversation(
+        await log_conversation(
             guild_id=self.guild.id,
             user_id=interaction.user.id,
             username=str(interaction.user),

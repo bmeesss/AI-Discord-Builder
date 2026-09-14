@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 
 from ai.models import ConversationSummary
-from database.repositories.conversation_repository import ConversationRepository
-
+from database import get_storage
+from database.interfaces import ConversationRepository
 
 logger = logging.getLogger("ai_discord_builder.conversation_intelligence")
 
@@ -20,15 +20,15 @@ class ConversationIntelligence:
         self,
         repository: ConversationRepository | None = None,
     ):
-        self.repository = repository or ConversationRepository()
+        self.repository = repository or get_storage().conversations
 
-    def get_summaries(
+    async def get_summaries(
         self,
         guild_id: int,
         limit: int = 3,
     ) -> list[ConversationSummary]:
         try:
-            return self.repository.get_summaries(
+            return await self.repository.get_summaries(
                 guild_id=str(guild_id),
                 limit=limit,
             )
@@ -36,7 +36,7 @@ class ConversationIntelligence:
             logger.exception("Failed loading conversation summaries")
             return []
 
-    def save_request_plan(
+    async def save_request_plan(
         self,
         guild_id: int,
         user_id: int,
@@ -45,7 +45,7 @@ class ConversationIntelligence:
         plan: dict,
     ) -> None:
         try:
-            self.repository.save_conversation(
+            await self.repository.save_conversation(
                 guild_id=str(guild_id),
                 user_id=str(user_id),
                 username=username,

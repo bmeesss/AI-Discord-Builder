@@ -93,7 +93,7 @@ Discord-wijzigingen.
 
 ## Docker
 
-De standaard Compose-configuratie start geen Ollama:
+De standaard Compose-configuratie start geen Ollama (wel PostgreSQL + bot):
 
 ```bash
 docker compose up -d
@@ -107,6 +107,9 @@ docker compose \
   -f compose.local-ai.yaml \
   up -d
 ```
+
+In deze modus draaien PostgreSQL, de bot, Ollama en de eenmalige
+model-initialisatie (`ollama-model`) naast elkaar.
 
 De overlay:
 

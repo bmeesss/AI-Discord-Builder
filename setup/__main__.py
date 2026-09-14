@@ -228,7 +228,9 @@ def run_cloud_setup(args: argparse.Namespace) -> int:
 
 def run_provider_test(args: argparse.Namespace) -> int:
     try:
-        config.validate_config(require_discord=False)
+        # The setup CLI tests the AI provider before the bot token and
+        # database are necessarily configured.
+        config.validate_config(require_discord=False, require_database=False)
         client = AIClient()
         health = asyncio.run(client.healthcheck())
         model_test = asyncio.run(client.test_connection())

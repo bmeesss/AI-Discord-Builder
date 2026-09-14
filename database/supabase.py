@@ -1,32 +1,33 @@
-import os
-import logging
+"""Backward-compatible lazy Supabase client accessor.
 
-from supabase import create_client, Client
+Kept for existing code and the opt-in Supabase smoke test.  The client is
+created lazily so that importing the storage layer (or running with the
+PostgreSQL backend) never instantiates — or warns about — Supabase.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
 
 logger = logging.getLogger("ai_discord_builder.supabase")
 
-SUPABASE_URL = os.getenv(
-    "SUPABASE_URL"
-)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-SUPABASE_KEY = os.getenv(
-    "SUPABASE_KEY"
-)
+_client = None
 
 
-supabase: Client | None = None
+def get_supabase():
+    global _client
 
+    if _client is not None:
+        return _client
 
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(
-        SUPABASE_URL,
-        SUPABASE_KEY
-    )
-else:
-    logger.warning(
-        "Supabase is not configured; database features are disabled."
-    )
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
 
+    from supabase import create_client
 
-def get_supabase() -> Client | None:
-    return supabase
+    _client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _client

@@ -14,7 +14,8 @@ import discord
 import config
 from ai.client import AIClient, AIPlanError
 from builder.context import build_server_context, render_server_context
-from database.repositories.analysis_repository import AnalysisRepository
+from database import get_storage
+from database.interfaces import AnalysisRepository
 
 logger = logging.getLogger("ai_discord_builder.ai_planning_service")
 
@@ -26,7 +27,9 @@ class AIPlanningService:
         analysis_repository: AnalysisRepository | None = None,
     ):
         self.ai_client = ai_client or AIClient()
-        self.analysis_repository = analysis_repository or AnalysisRepository()
+        self.analysis_repository = (
+            analysis_repository or get_storage().analysis
+        )
 
     async def build_plan(
         self,
@@ -34,8 +37,7 @@ class AIPlanningService:
         user: discord.abc.User,
         prompt: str,
     ) -> dict:
-        context = await asyncio.to_thread(
-            build_server_context,
+        context = await build_server_context(
             guild,
             user,
             prompt,
@@ -43,8 +45,7 @@ class AIPlanningService:
 
         if context.analysis:
             try:
-                await asyncio.to_thread(
-                    self.analysis_repository.save_analysis,
+                await self.analysis_repository.save_analysis(
                     context.analysis,
                 )
             except Exception:

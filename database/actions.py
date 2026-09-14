@@ -1,97 +1,45 @@
-from database.supabase import get_supabase
+"""Backwards-compatible async wrappers for action history.
+
+The canonical implementations live behind the storage factory
+(``database/interfaces.py``); these wrappers keep the historical import
+paths working for existing code while delegating to the configured backend
+(PostgreSQL or Supabase).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from database import get_storage
 
 
-def _client():
-    client = get_supabase()
-    if client is None:
-        raise RuntimeError("Supabase is not configured.")
-    return client
-
-
-
-def add_action(
+async def add_action(
     guild_id: int,
     action: dict,
-    user_id: int | None = None
-):
-
-    _client().table(
-        "actions"
-    ).insert(
-        {
-            "guild_id": str(guild_id),
-            "user_id": str(user_id) if user_id else None,
-            "action_type": action.get("type"),
-            "data": action
-        }
-    ).execute()
-
-
-
-def get_last_actions(
-    guild_id: int,
-    amount: int = 10
-):
-
-    result = (
-        _client().table("actions")
-        .select("*")
-        .eq(
-            "guild_id",
-            str(guild_id)
-        )
-        .order(
-            "created_at",
-            desc=True
-        )
-        .limit(amount)
-        .execute()
+    user_id: int | None = None,
+) -> None:
+    await get_storage().actions.add_action(
+        str(guild_id),
+        action,
+        str(user_id) if user_id else None,
     )
 
 
-    actions = []
-
-
-    for row in reversed(result.data):
-
-        actions.append(
-            {
-                "action": row["data"],
-                "timestamp": row["created_at"]
-            }
-        )
-
-
-    return actions
-
-
-
-def remove_last_actions(
+async def get_last_actions(
     guild_id: int,
-    amount: int = 1
-):
-
-    rows = (
-        _client().table("actions")
-        .select("id")
-        .eq(
-            "guild_id",
-            str(guild_id)
-        )
-        .order(
-            "created_at",
-            desc=True
-        )
-        .limit(amount)
-        .execute()
+    amount: int = 10,
+) -> list[dict[str, Any]]:
+    return await get_storage().actions.get_last_actions(
+        str(guild_id),
+        amount,
     )
 
 
-    for row in rows.data:
-
-        _client().table(
-            "actions"
-        ).delete().eq(
-            "id",
-            row["id"]
-        ).execute()
+async def remove_last_actions(
+    guild_id: int,
+    amount: int = 1,
+) -> None:
+    await get_storage().actions.remove_last_actions(
+        str(guild_id),
+        amount,
+    )

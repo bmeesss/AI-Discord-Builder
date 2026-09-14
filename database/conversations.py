@@ -1,19 +1,19 @@
-import logging
+"""Backwards-compatible conversation persistence over the storage layer."""
+
+from __future__ import annotations
+
 import json
+import logging
 from dataclasses import asdict
 
-from database.repositories.conversation_repository import ConversationRepository
-
+from database import get_storage
 
 logger = logging.getLogger(
     "ai_discord_builder.conversations"
 )
 
-repository = ConversationRepository()
 
-
-
-def save_conversation(
+async def save_conversation(
     guild_id: int,
     user_id: int,
     username: str,
@@ -24,12 +24,12 @@ def save_conversation(
     try:
         try:
             ai_plan = json.loads(response)
-        except Exception:
+        except (TypeError, ValueError):
             ai_plan = {
                 "raw": response,
             }
 
-        repository.save_conversation(
+        await get_storage().conversations.save_conversation(
             guild_id=str(guild_id),
             user_id=str(user_id),
             username=username,
@@ -51,8 +51,7 @@ def save_conversation(
         )
 
 
-
-def get_recent_conversations(
+async def get_recent_conversations(
     guild_id: int,
     limit: int = 10
 ):
@@ -60,7 +59,7 @@ def get_recent_conversations(
     try:
         return [
             asdict(summary)
-            for summary in repository.get_summaries(
+            for summary in await get_storage().conversations.get_summaries(
                 guild_id=str(guild_id),
                 limit=limit,
             )

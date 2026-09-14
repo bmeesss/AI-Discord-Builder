@@ -12,6 +12,11 @@ Ondersteunde AI-providers:
 - OpenAI (cloud);
 - Ollama (optionele lokale AI).
 
+Ondersteunde opslag-backends (conversations, memories, rollback-history):
+
+- PostgreSQL — **standaard voor self-hosting**, lokaal via Docker;
+- Supabase — optionele cloud-backend.
+
 Local AI is optioneel. Cloud-only installaties starten geen Ollama en downloaden
 geen lokale modellen.
 
@@ -41,15 +46,57 @@ docker compose up -d
 docker compose logs -f bot
 ```
 
-De standaard Compose-configuratie voegt geen Ollama toe. De huidige
-persistentielaag blijft de optionele Supabase-adapter gebruiken; vul
-`SUPABASE_URL` en `SUPABASE_KEY` in wanneer conversation/action persistence en
-rollback via Supabase gewenst zijn.
+Dit start PostgreSQL (`db`) en de bot. De bot wacht tot PostgreSQL gezond is,
+draait daarna automatisch de datamigraties en start pas dan. Er is **geen
+Supabase-account of cloud-database nodig**. Data overleeft restarts via het
+named volume `postgres_data`.
+
+De standaard Compose-configuratie voegt geen Ollama toe. Wil je Supabase
+gebruiken in plaats van de lokale PostgreSQL, zet dan
+`DATABASE_BACKEND=supabase` met `SUPABASE_URL` en `SUPABASE_KEY` in `.env`.
+Zie [docs/self-hosting.md](docs/self-hosting.md) voor migraties, backups,
+upgrades en troubleshooting.
 
 Health endpoints:
 
 - `http://127.0.0.1:8080/healthz` — process liveness;
-- `http://127.0.0.1:8080/readyz` — Discord runtime readiness.
+- `http://127.0.0.1:8080/readyz` — readiness: Discord runtime **én** database
+  (bereikbaar + migraties uitgevoerd), anders HTTP 503.
+
+## Database en self-hosting
+
+De applicatiecode praat uitsluitend met provider-neutrale storage-interfaces
+(`database/interfaces.py`); de storage factory kiest de backend via
+`DATABASE_BACKEND`:
+
+- `postgres` (default): async PostgreSQL (asyncpg) met connection pooling en
+  versie-gestuurde migraties in `database/postgres/migrations/`;
+- `supabase`: de bestaande Supabase-adapter, ongewijzigd beschikbaar.
+
+Bestaande installaties die alleen `SUPABASE_URL`/`SUPABASE_KEY` hebben,
+blijven automatisch Supabase gebruiken tot `DATABASE_BACKEND` expliciet wordt
+gezet.
+
+Migrations handmatig beheren:
+
+```bash
+# Docker
+docker compose exec bot python -m database migrate
+docker compose exec bot python -m database status
+
+# Host
+python -m database migrate
+python -m database status
+```
+
+De bot controleert bij startup of de database bereikbaar is en het schema
+up-to-date is; bij een fout stopt de startup direct met een duidelijke
+melding in plaats van later willekeurig te crashen.
+
+De opslaglaag slaat alleen state/history op en bepaalt **nooit** of een
+Discord-actie is toegestaan — autorisatie blijft bij de
+permission/executor-laag. Repository-methodes filteren server-side op
+`guild_id`.
 
 ## Cloud AI configureren
 
@@ -207,12 +254,18 @@ python -m unittest discover -v
 pytest -q
 ```
 
-De normale tests gebruiken mocks en hebben geen Ollama-server nodig. De echte
-Ollama integration test is opt-in:
+De normale tests gebruiken mocks en hebben geen Ollama-server of database
+nodig. De echte integration tests zijn opt-in:
 
 ```bash
+# Ollama
 RUN_OLLAMA_TESTS=1 python -m unittest \
   tests.integration.test_ollama_integration
+
+# PostgreSQL (bijv. tegen de Compose-database)
+RUN_POSTGRES_TESTS=1 \
+DATABASE_URL=postgresql://discord_builder:discord_builder@localhost:5432/discord_builder \
+  python -m unittest tests.integration.test_postgres_integration
 ```
 
 ## Beveiligingsgrenzen
@@ -231,6 +284,9 @@ RUN_OLLAMA_TESTS=1 python -m unittest \
   voorgestelde actie.
 - Hardwaredetectie kan geen prestaties garanderen.
 - Modelkwaliteit en JSON-betrouwbaarheid kunnen per lokaal model verschillen.
-- De bestaande database/persistence-laag blijft optioneel en vereist de huidige
-  Supabase-configuratie wanneer die functies worden gebruikt.
+- Rollback-history heeft geen eigen statuskolom: alleen succesvol uitgevoerde
+  acties worden opgeslagen, en `rollback` kijkt naar de laatste N acties
+  (oudste eerst). Deze bestaande semantiek is bewust behouden.
+- De opslaglaag kent geen per-guild settings-tabel; guild-specifieke bot-
+  instellingen leven nu in environment/config (gedocumenteerd, geen redesign).
 - Een publiek webdashboard is nog niet geïmplementeerd.

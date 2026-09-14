@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
@@ -94,11 +94,25 @@ WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
 WEB_PORT = _env_int("WEB_PORT", 8080, minimum=1)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 
-# DATABASE_URL is documented for the self-hosting deployment direction.  The
-# current repository still uses the optional Supabase adapter when configured.
+# --- Database / persistence ---
+# "postgres" is the recommended default for self-hosting; "supabase" remains
+# supported as an optional cloud backend.  When DATABASE_BACKEND is not set
+# the storage factory falls back to "supabase" only for existing deployments
+# that have Supabase keys (and no DATABASE_URL) configured.
+DATABASE_BACKEND = os.getenv("DATABASE_BACKEND", "").strip().lower()
 DATABASE_URL = os.getenv("DATABASE_URL") or None
+DB_POOL_MIN_SIZE = _env_int("DB_POOL_MIN_SIZE", 1, minimum=1)
+DB_POOL_MAX_SIZE = _env_int("DB_POOL_MAX_SIZE", 10, minimum=1)
+DB_MIGRATE_ON_STARTUP = _env_bool("DB_MIGRATE_ON_STARTUP", True)
 SUPABASE_URL = os.getenv("SUPABASE_URL") or None
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or None
+
+VALID_DATABASE_BACKENDS = frozenset({"postgres", "supabase"})
+
+# Database containers (Compose) read these; they are not bot settings.
+POSTGRES_USER = os.getenv("POSTGRES_USER", "discord_builder")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD") or None
+POSTGRES_DB = os.getenv("POSTGRES_DB", "discord_builder")
 
 # --- Logging ---
 LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", "logs/actions.log")
@@ -107,12 +121,13 @@ LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", "logs/actions.log")
 def validate_config(
     environ: dict[str, str] | None = None,
     require_discord: bool = True,
+    require_database: bool = True,
 ) -> None:
     """Validate configuration without revealing secret values.
 
-    ``environ`` is injectable for tests and ``require_discord=False`` is used by
-    the setup CLI, which must be able to inspect/test local AI before a bot
-    token has been entered.
+    ``environ`` is injectable for tests.  ``require_discord=False`` and
+    ``require_database=False`` are used by the setup CLI, which must be able
+    to inspect/test local AI before bot token or database settings exist.
     """
 
     values: Callable[[str], str | None]
@@ -158,6 +173,49 @@ def validate_config(
             raise RuntimeError(
                 "OLLAMA_BASE_URL must be an absolute http:// or https:// URL."
             )
+
+    if require_database:
+        backend = (
+            configured("DATABASE_BACKEND", DATABASE_BACKEND) or ""
+        ).strip().lower()
+        database_url = configured("DATABASE_URL", DATABASE_URL)
+        supabase_url = configured("SUPABASE_URL", SUPABASE_URL)
+        supabase_key = configured("SUPABASE_KEY", SUPABASE_KEY)
+
+        if backend and backend not in VALID_DATABASE_BACKENDS:
+            supported = ", ".join(sorted(VALID_DATABASE_BACKENDS))
+            raise RuntimeError(
+                f"Unknown DATABASE_BACKEND={backend!r}. "
+                f"Supported backends: {supported}."
+            )
+
+        if not backend:
+            # Same auto-detection as the storage factory: existing
+            # Supabase-only deployments keep working without new settings.
+            backend = (
+                "supabase"
+                if supabase_url and supabase_key and not database_url
+                else "postgres"
+            )
+
+        if backend == "postgres":
+            if not database_url:
+                missing.append("DATABASE_URL")
+            else:
+                parsed_dsn = urlparse(database_url.strip())
+                has_host = bool(parsed_dsn.hostname) or "host" in parse_qs(
+                    parsed_dsn.query
+                )
+                if parsed_dsn.scheme not in {"postgresql", "postgres"} or not has_host:
+                    raise RuntimeError(
+                        "DATABASE_URL must be a valid "
+                        "postgresql://user:password@host:5432/database URL."
+                    )
+        else:
+            if not supabase_url:
+                missing.append("SUPABASE_URL")
+            if not supabase_key:
+                missing.append("SUPABASE_KEY")
 
     if missing:
         raise RuntimeError(

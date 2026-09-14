@@ -8,3 +8,5 @@ flask>=3.0.0,<4
 gunicorn>=22.0.0,<24
 # Optional persistence adapter used by the existing repository.
 supabase>=2.0.0,<3
+# Async PostgreSQL driver — default self-hosting storage backend.
+asyncpg>=0.29.0,<1

@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 
 from ai.models import MemoryItem
-from database.repositories.memory_repository import MemoryRepository
-
+from database import get_storage
+from database.interfaces import MemoryRepository
 
 logger = logging.getLogger("ai_discord_builder.memory_service")
 
@@ -21,16 +21,16 @@ class MemoryService:
         self,
         repository: MemoryRepository | None = None,
     ):
-        self.repository = repository or MemoryRepository()
+        self.repository = repository or get_storage().memories
 
-    def get_relevant_memories(
+    async def get_relevant_memories(
         self,
         guild_id: int,
         user_id: int | None,
         limit: int = 10,
     ) -> list[MemoryItem]:
         try:
-            return self.repository.get_memories(
+            return await self.repository.get_memories(
                 guild_id=str(guild_id),
                 user_id=str(user_id) if user_id else None,
                 limit=limit,
@@ -39,7 +39,7 @@ class MemoryService:
             logger.exception("Failed loading memories")
             return []
 
-    def remember_preference(
+    async def remember_preference(
         self,
         guild_id: int,
         key: str,
@@ -48,7 +48,7 @@ class MemoryService:
         confidence: float = 0.7,
     ) -> None:
         try:
-            self.repository.upsert_memory(
+            await self.repository.upsert_memory(
                 guild_id=str(guild_id),
                 user_id=str(user_id) if user_id else None,
                 key=key,
