@@ -1,16 +1,12 @@
+"""AI Discord Builder runtime entrypoint.
 
+The runtime stays intentionally small: Discord remains the source of truth for
+server state, while the AI provider only returns validated plan text.  The
+optional local-AI setup is a separate CLI (``python -m setup``); bot startup
+never installs software or downloads models.
 """
-main.py
 
-Entrypoint van AI-Discord-Builder.
-
-Start:
-- Flask webserver
-- Discord bot
-- Logging
-- Slash commands
-- Cogs/extensions
-"""
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -21,211 +17,133 @@ import discord
 from discord.ext import commands
 
 import config
-from web.app import app
+from web.app import app, set_ready
+
+logger = logging.getLogger("ai_discord_builder")
+main_logger = logging.getLogger("ai_discord_builder.main")
 
 
-# =========================
-# FLASK WEB SERVER
-# =========================
+def configure_logging() -> None:
+    """Configure console and optional file logging once."""
 
-def run_web():
+    logger.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
+    logger.propagate = False
 
-    app.run(
-        host="0.0.0.0",
-        port=8080
+    if logger.handlers:
+        return
+
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
     )
-
-
-threading.Thread(
-    target=run_web,
-    daemon=True
-).start()
-
-
-# =========================
-# LOGGING
-# =========================
-
-os.makedirs(
-    os.path.dirname(config.LOG_FILE_PATH) or ".",
-    exist_ok=True
-)
-
-
-logger = logging.getLogger(
-    "ai_discord_builder"
-)
-
-logger.setLevel(
-    logging.INFO
-)
-
-
-if not logger.handlers:
 
     console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
-    console_handler.setFormatter(
-        logging.Formatter(
-            "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+    if config.LOG_FILE_PATH:
+        os.makedirs(
+            os.path.dirname(config.LOG_FILE_PATH) or ".",
+            exist_ok=True,
         )
-    )
-
-    logger.addHandler(
-        console_handler
-    )
-
-
-    file_handler = logging.FileHandler(
-        config.LOG_FILE_PATH,
-        encoding="utf-8"
-    )
-
-    file_handler.setFormatter(
-        logging.Formatter(
-            "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+        file_handler = logging.FileHandler(
+            config.LOG_FILE_PATH,
+            encoding="utf-8",
         )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+
+def run_web() -> None:
+    # Flask is retained for the current lightweight health endpoint.  A future
+    # public web UI should run as a separately authenticated service.
+    app.run(
+        host=config.WEB_HOST,
+        port=config.WEB_PORT,
+        use_reloader=False,
     )
 
-    logger.addHandler(
-        file_handler
+
+def start_web_thread() -> threading.Thread:
+    thread = threading.Thread(
+        target=run_web,
+        name="health-http",
+        daemon=True,
     )
+    thread.start()
+    return thread
 
-
-main_logger = logging.getLogger(
-    "ai_discord_builder.main"
-)
-
-
-# =========================
-# DISCORD BOT
-# =========================
 
 intents = discord.Intents.default()
-
 intents.guilds = True
 intents.members = True
-
-# Required for @mention command handler
+# Required only for the optional @mention command handler.
 intents.message_content = True
-
 
 bot = commands.Bot(
     command_prefix="!",
-    intents=intents
+    intents=intents,
 )
 
 
-# =========================
-# READY EVENT
-# =========================
-
 @bot.event
 async def on_ready():
-
     main_logger.info(
-        "Logged in as %s (ID: %s)",
+        "Logged in as %s (ID: %s); connected to %s guild(s)",
         bot.user,
-        bot.user.id
-    )
-
-    main_logger.info(
-        "Guilds: %s",
-        [
-            guild.name
-            for guild in bot.guilds
-        ]
-    )
-
-    main_logger.info(
-        "Loaded commands: %s",
-        [
-            command.name
-            for command in bot.tree.get_commands()
-        ]
+        bot.user.id if bot.user else "unknown",
+        len(bot.guilds),
     )
 
     try:
-
         for guild in bot.guilds:
-
-            # Kopieer globale commands naar server
-            bot.tree.copy_global_to(
-                guild=guild
-            )
-
-            synced = await bot.tree.sync(
-                guild=guild
-            )
-
+            # Commands are synced per guild for predictable self-hosted startup.
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
             main_logger.info(
-                "Synced %s commands naar %s",
+                "Synced %s commands to guild ID %s",
                 len(synced),
-                guild.name
+                guild.id,
             )
-
     except Exception:
+        set_ready(False)
+        main_logger.exception("Slash command sync failed")
+        return
 
-        main_logger.exception(
-            "Slash command sync failed"
-        )
+    set_ready(True)
 
 
-# =========================
-# LOAD EXTENSIONS
-# =========================
-
-async def load_extensions():
-
+async def load_extensions() -> None:
     extensions = [
-
         "commands.ask",
         "commands.rollback",
         "commands.mention",
-
     ]
+    failures: list[str] = []
 
     for extension in extensions:
-
         try:
-
-            await bot.load_extension(
-                extension
-            )
-
-            main_logger.info(
-                "Loaded extension: %s",
-                extension
-            )
-
+            await bot.load_extension(extension)
+            main_logger.info("Loaded extension: %s", extension)
         except Exception:
+            failures.append(extension)
+            main_logger.exception("Failed loading extension: %s", extension)
 
-            main_logger.exception(
-                "Failed loading extension: %s",
-                extension
-            )
-
-
-# =========================
-# START BOT
-# =========================
-
-async def main():
-
-    config.validate_config()
-
-    async with bot:
-
-        await load_extensions()
-
-        await bot.start(
-            config.DISCORD_TOKEN
+    if failures:
+        raise RuntimeError(
+            "Failed to load Discord extensions: " + ", ".join(failures)
         )
 
 
+async def main() -> None:
+    configure_logging()
+    config.validate_config()
+    set_ready(False)
+    start_web_thread()
+
+    async with bot:
+        await load_extensions()
+        await bot.start(config.DISCORD_TOKEN)
+
+
 if __name__ == "__main__":
-
-    asyncio.run(
-        main()
-    )
-
+    asyncio.run(main())

@@ -1,0 +1,10 @@
+# Cloud-provider baseline. Ollama is deliberately not part of this file.
+# Start with: docker compose up -d
+services:
+  bot:
+    build: .
+    env_file:
+      - .env
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"

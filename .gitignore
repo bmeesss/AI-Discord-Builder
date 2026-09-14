@@ -1,7 +1,12 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 logs/*.log
 .venv/
 venv/
+data/
+*.db
+*.sqlite
 .continue/mcpServers/new-mcp-server.yaml

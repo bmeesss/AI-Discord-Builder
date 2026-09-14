@@ -9,12 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import config
 import discord
+
+import config
 from ai.client import AIClient, AIPlanError
 from builder.context import build_server_context, render_server_context
 from database.repositories.analysis_repository import AnalysisRepository
-
 
 logger = logging.getLogger("ai_discord_builder.ai_planning_service")
 
@@ -62,7 +62,7 @@ class AIPlanningService:
                         rendered_context,
                         validation_errors=validation_errors or None,
                     ),
-                    timeout=60,
+                    timeout=config.AI_REQUEST_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
                 raise AIPlanError("AI request timed out")
