@@ -12,7 +12,6 @@ from ai.models import TemplateCandidate
 from database import get_storage
 from database.interfaces import TemplateRepository
 
-
 logger = logging.getLogger("ai_discord_builder.template_service")
 
 

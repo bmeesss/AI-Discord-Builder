@@ -103,6 +103,6 @@ class PostgresBackend:
             await self._pool.ping()
         except StorageUnavailableError as exc:
             return False, str(exc)
-        except Exception as exc:  # healthchecks nooit laten crashen
+        except Exception as exc:  # noqa: BLE001 - healthchecks nooit laten crashen
             return False, f"PostgreSQL healthcheck failed: {exc}"
         return True, "postgres ok"

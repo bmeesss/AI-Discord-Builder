@@ -13,7 +13,6 @@ from ai.models import MemoryItem
 from database import get_storage
 from database.interfaces import MemoryRepository
 
-
 logger = logging.getLogger("ai_discord_builder.memory_service")
 
 

@@ -15,9 +15,9 @@ import logging
 
 import config
 from database.errors import StorageNotConfiguredError
+from database.postgres.backend import PostgresBackend
 from database.storage import Storage
 from database.supabase_backend import SupabaseBackend
-from database.postgres.backend import PostgresBackend
 
 logger = logging.getLogger("ai_discord_builder.database.factory")
 

@@ -58,16 +58,49 @@ start), `PostgreSQL backend ready`, `Logged in as ...`.
 
 ## .env setup
 
-Belangrijkste database-instellingen:
+### Complete configuratietabel
 
-| Variabele | Standaard | Betekenis |
-| --- | --- | --- |
-| `DATABASE_BACKEND` | `postgres` | `postgres` (self-hosting) of `supabase` (cloud) |
-| `DATABASE_URL` | `postgresql://discord_builder:discord_builder@db:5432/discord_builder` | PostgreSQL DSN |
-| `DB_POOL_MIN_SIZE` | `1` | minimale poolgrootte |
-| `DB_POOL_MAX_SIZE` | `10` | maximale poolgrootte |
-| `DB_MIGRATE_ON_STARTUP` | `true` | migraties automatisch uitvoeren bij bot-start |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `discord_builder` | credentials van de Compose-database |
+Verplicht volgt uit `AI_PROVIDER` en `DATABASE_BACKEND`; de rest heeft
+werkende standaarden.
+
+| Variabele | Standaard | Verplicht? | Betekenis |
+| --- | --- | --- | --- |
+| `DISCORD_TOKEN` | — | ja | Discord bot-token |
+| `AI_PROVIDER` | `groq` | ja | `groq`, `openai` of `ollama` |
+| `GROQ_API_KEY` | — | bij `groq` | Groq API-key |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | nee | Groq modelnaam |
+| `OPENAI_API_KEY` | — | bij `openai` | OpenAI API-key |
+| `OPENAI_MODEL` | `gpt-4o-mini` | nee | OpenAI modelnaam |
+| `OPENAI_BASE_URL` | — | nee | optioneel OpenAI-compatible endpoint (uit) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | bij `ollama` | Ollama endpoint (Compose-overlay: `http://ollama:11434`) |
+| `OLLAMA_MODEL` | `qwen3:4b` | bij `ollama` | lokaal model |
+| `OLLAMA_HOST_PORT` | `11434` | nee | host-poort voor de Ollama-container (alleen Compose) |
+| `LOCAL_AI_MODEL` | = `OLLAMA_MODEL` | nee | alias voor het lokale model |
+| `LOCAL_AI_AUTO_SETUP` | `false` | nee | setup-CLI mag installeren (altijd interactief bevestigen) |
+| `LOCAL_AI_AUTO_SELECT_MODEL` | `true` | nee | modeladvies op basis van hardware |
+| `AI_REQUEST_TIMEOUT_SECONDS` | `60` | nee | timeout per AI-request |
+| `DATABASE_BACKEND` | `postgres`* | nee | `postgres` (aanbevolen) of `supabase` |
+| `DATABASE_URL` | `postgresql://discord_builder:discord_builder@db:5432/discord_builder` | bij `postgres` | PostgreSQL DSN (host `db` in Compose, `localhost` op de host) |
+| `DB_POOL_MIN_SIZE` | `1` | nee | minimale poolgrootte |
+| `DB_POOL_MAX_SIZE` | `10` | nee | maximale poolgrootte |
+| `DB_MIGRATE_ON_STARTUP` | `true` | nee | migraties automatisch bij bot-start |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `discord_builder` | nee (Compose) | credentials van de Compose-database — **wijzig het wachtwoord** |
+| `SUPABASE_URL` / `SUPABASE_KEY` | — | bij `supabase` | optionele cloud-backend (uit) |
+| `REQUIRE_ADMIN` | `true` | nee | alleen Administrators mogen `/ask` gebruiken |
+| `MAX_ACTIONS_PER_PLAN` | `40` | nee | veiligheidslimiet per AI-plan |
+| `MAX_AI_RETRIES` | `2` | nee | self-correction pogingen |
+| `CONFIRMATION_TIMEOUT` | `120` | nee | levensduur bevestigingsknoppen (seconden) |
+| `APP_ENV` | `production` | nee | deployment-context |
+| `WEB_HOST` | `0.0.0.0` | nee | bind-adres health-endpoints |
+| `WEB_PORT` | `8080` | nee | poort health-endpoints |
+| `LOG_LEVEL` | `INFO` | nee | logniveau |
+| `LOG_FILE_PATH` | `logs/actions.log` | nee | logbestand |
+
+\* Zonder expliciete `DATABASE_BACKEND` kiezen bestaande installaties die
+alleen `SUPABASE_URL`/`SUPABASE_KEY` hebben automatisch Supabase.
+
+`(uit)`-markering betekent: staat in `.env.example` als uit-gecommentarieerde
+optie.
 
 Regels:
 
@@ -84,6 +117,8 @@ Regels:
 Bij `DATABASE_BACKEND=supabase` start `docker compose up -d` ook de lokale
 `db`-container mee (via `depends_on`); die blijft dan ongebruikt. Alleen de
 bot bijwerken/starten zonder db kan met `docker compose up -d --no-deps bot`.
+De supabase-backend doet een startup-ping op de `actions`-tabel en faalt met
+een duidelijke fout als die niet bereikbaar is.
 Het verwijderen van de `db`-service uit een eigen kopie van `compose.yaml`
 kan uiteraard ook.
 
@@ -93,6 +128,9 @@ Migraties staan in `database/postgres/migrations/` en draaien versie-gestuurd
 via de tabel `schema_migrations` (met SHA-256-checksum per migratie). Ze
 worden hooguit één keer uitgevoerd; een gewijzigde al-toegepaste migratie
 leidt tot een harde fout. Elke migratie draait in een eigen transactie.
+Een volledige migratie-run houdt een PostgreSQL advisory lock vast, zodat
+twee botprocessen nooit tegelijk migraties toepassen (gevalideerd met
+gelijktijdige runs tegen een echte database).
 
 Handmatig beheer (bijv. met `DB_MIGRATE_ON_STARTUP=false`):
 
@@ -206,6 +244,34 @@ docker compose logs -f bot
 In Docker zijn deze alleen op de host bereikbaar via
 `http://127.0.0.1:8080/...` (loopback binding).
 
+## Restart-gedrag
+
+Gevalideerd tegen een echte PostgreSQL (integratietests
+`tests/integration/test_startup_flow.py`):
+
+- **bot herstart** (`docker compose restart bot`): migraties zijn
+  idempotent — `schema_migrations` bevat daarna nog steeds exact dezelfde
+  versies; geschreven data blijft bestaan; `/readyz` wordt weer 200 zodra
+  Discord én de database ready zijn;
+- **db herstart** (`docker compose restart db`): de asyncpg-pool vervangt
+  dode verbindingen automatisch. De periodieke healthmonitor kan één cyclus
+  lang `database` op "not ok" zetten (`/readyz` = 503) en herstelt daarna
+  vanzelf naar 200 — zodra de pool weer gezond is. Handmatig opnieuw
+  starten is niet nodig;
+- **db onbereikbaar bij bot-start**: de bot stopt direct met
+  `Database initialization failed (...)` en start nooit half; met
+  `restart: unless-stopped` probeert Compose opnieuw tot de database er is.
+
+## `down` versus `down -v`
+
+```bash
+docker compose down      # containers/netwerk weg; volumes blijven (data blijft)
+docker compose down -v   # verwijdert OOK postgres_data en ollama_models (data weg)
+```
+
+Gebruik `down -v` alleen als je bewust alle opgeslagen history, memories en
+conversations wilt verwijderen.
+
 ## Data-persistentie
 
 - `postgres_data` (named volume) overleeft `docker compose restart`,
@@ -240,3 +306,18 @@ docker compose exec db \
 Verwachting: de `count` blijft na elke stap gelijk. In CI wordt dit als
 automatische integratietest uitgevoerd tegen een echte PostgreSQL
 (`.github/workflows/ci.yml`, job `postgres-integration`).
+
+## Validatiestatus van deze handleiding
+
+Zonder Docker-daemon in ontwikkelomgevingen gebeurt container-validatie zo:
+
+- **Wel live getest** (tegen echte PostgreSQL): migraties + CLI
+  (`status`/`migrate`), repository-roundtrips, guild isolation, bot/db
+  restart-analoga, connection-loss recovery, concurrente migratie-runs,
+  startup-failure modes. Zie `tests/integration/test_startup_flow.py`.
+- **Niet live getest** (geen Docker-daemon beschikbaar tijdens ontwikkeling):
+  `docker compose config`, `docker compose up`, container-level restarts en
+  Ollama-containerstart. Dit is statisch gevalideerd (YAML-structuur,
+  `${VAR}`-interpolatie, `depends_on`-volgorde, merge van de local-AI
+  overlay) in `tests/test_compose_files.py`; dezelfde compose-validatie draait
+  in CI met een echte `docker compose config`.

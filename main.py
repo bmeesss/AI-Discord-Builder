@@ -157,7 +157,7 @@ async def monitor_storage(storage: database.Storage) -> None:
     while True:
         try:
             ok, detail = await storage.healthcheck()
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  # noqa: BLE001 - pragma: no cover - defensive
             ok, detail = False, f"healthcheck error: {exc}"
         set_component("database", ok, detail)
         await asyncio.sleep(STORAGE_HEALTH_INTERVAL_SECONDS)

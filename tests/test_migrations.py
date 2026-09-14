@@ -194,6 +194,42 @@ class MigratorTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class MigrationLockTests(unittest.IsolatedAsyncioTestCase):
+    async def test_migration_run_holds_advisory_lock(self):
+        tracker = _AppliedTracker()
+        directory = make_migrations_dir({"001_first.sql": "select 1;"})
+        migrator = Migrator(tracker.pool, directory=directory)
+
+        await migrator.migrate()
+
+        sql_statements = [sql for sql, _ in tracker.conn.executed]
+        self.assertTrue(
+            any("pg_advisory_lock" in sql for sql in sql_statements),
+            "migrate() must take a PostgreSQL advisory lock",
+        )
+        self.assertTrue(
+            any("pg_advisory_unlock" in sql for sql in sql_statements),
+            "migrate() must release the advisory lock",
+        )
+
+    async def test_lock_released_after_failed_migration(self):
+        tracker = _AppliedTracker()
+        tracker.conn.fail_on_execute = RuntimeError("boom")
+        tracker.conn.fail_substring = "select failing"
+
+        directory = make_migrations_dir({"001_first.sql": "select failing;"})
+        migrator = Migrator(tracker.pool, directory=directory)
+
+        with self.assertRaises(MigrationError):
+            await migrator.migrate()
+
+        sql_statements = [sql for sql, _ in tracker.conn.executed]
+        self.assertTrue(
+            any("pg_advisory_unlock" in sql for sql in sql_statements),
+            "the advisory lock must be released even after a failure",
+        )
+
+
 class RealMigrationsFileTests(unittest.TestCase):
     def test_repository_migrations_are_discoverable(self):
         """The shipped migration files are valid and ordered."""

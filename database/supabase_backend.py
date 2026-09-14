@@ -198,6 +198,6 @@ class SupabaseBackend:
     async def healthcheck(self) -> tuple[bool, str]:
         try:
             await asyncio.to_thread(self._ping_sync)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - healthchecks nooit laten crashen
             return False, f"Supabase healthcheck failed: {exc}"
         return True, "supabase ok"

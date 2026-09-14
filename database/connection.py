@@ -8,6 +8,7 @@ netjes gesloten.  Alle queries in de repositories gebruiken asyncpg's
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import parse_qs, urlparse, urlunparse
 
@@ -87,6 +88,9 @@ class PostgresPool:
         self._connect_timeout = connect_timeout
         self._command_timeout = command_timeout
         self._pool: asyncpg.Pool | None = None
+        # Serializes lazy pool creation so concurrent first-use callers can
+        # never create two pools for the same DSN.
+        self._open_lock = asyncio.Lock()
 
     @property
     def dsn(self) -> str:
@@ -107,28 +111,32 @@ class PostgresPool:
         if self._pool is not None:
             return self._pool
 
-        logger.info(
-            "Connecting to PostgreSQL at %s (pool %s-%s)",
-            mask_dsn(self._dsn),
-            self._min_size,
-            self._max_size,
-        )
+        async with self._open_lock:
+            if self._pool is not None:
+                return self._pool
 
-        try:
-            # asyncpg reconnects dropped pooled connections automatically.
-            self._pool = await asyncpg.create_pool(
-                dsn=self._dsn,
-                min_size=self._min_size,
-                max_size=self._max_size,
-                timeout=self._connect_timeout,
-                command_timeout=self._command_timeout,
+            logger.info(
+                "Connecting to PostgreSQL at %s (pool %s-%s)",
+                mask_dsn(self._dsn),
+                self._min_size,
+                self._max_size,
             )
-        except Exception as exc:  # asyncpg raises many concrete error types
-            self._pool = None
-            raise StorageUnavailableError(
-                "Could not connect to PostgreSQL at "
-                f"{mask_dsn(self._dsn)}: {exc}"
-            ) from exc
+
+            try:
+                # asyncpg reconnects dropped pooled connections automatically.
+                self._pool = await asyncpg.create_pool(
+                    dsn=self._dsn,
+                    min_size=self._min_size,
+                    max_size=self._max_size,
+                    timeout=self._connect_timeout,
+                    command_timeout=self._command_timeout,
+                )
+            except Exception as exc:  # asyncpg raises many concrete errors
+                self._pool = None
+                raise StorageUnavailableError(
+                    "Could not connect to PostgreSQL at "
+                    f"{mask_dsn(self._dsn)}: {exc}"
+                ) from exc
 
         return self._pool
 

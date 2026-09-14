@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import builder.history as history
+from builder import history
 from database import set_storage
 
 

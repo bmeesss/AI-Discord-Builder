@@ -8,7 +8,6 @@ from dataclasses import asdict
 
 from database import get_storage
 
-
 logger = logging.getLogger(
     "ai_discord_builder.conversations"
 )
@@ -25,7 +24,7 @@ async def save_conversation(
     try:
         try:
             ai_plan = json.loads(response)
-        except Exception:
+        except (TypeError, ValueError):
             ai_plan = {
                 "raw": response,
             }

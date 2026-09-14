@@ -8,6 +8,11 @@ migratie af, dan stopt alles met een duidelijke fout in plaats van stil
 door te gaan.  Elke migratie draait in een eigen transactie — een mislukte
 migratie laat geen half-schema achter.  Er zijn geen destructieve
 automatische migraties.
+
+Concurrency: een volledige migratie-run houdt een PostgreSQL advisory lock
+vast, zodat twee botprocessen (bijv. bij een per ongeluk dubbele container)
+nooit tegelijk migraties toepassen.  Het tweede proces wacht op de lock en
+ziet daarna dat er niets meer pending is.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 _FILENAME = re.compile(r"^(?P<version>\d+)_(?P<name>.+)\.sql$")
 
-_CREATE_MIGRATIONS_TABLE = """
+CREATE_MIGRATIONS_TABLE = """
 create table if not exists schema_migrations (
     version text primary key,
     name text not null,
@@ -35,6 +40,10 @@ create table if not exists schema_migrations (
     applied_at timestamptz not null default now()
 )
 """
+
+# Stable session-level advisory lock key for serialization of migration runs.
+# (The exact number is irrelevant; it only has to be stable across processes.)
+MIGRATION_LOCK_KEY = 863_104
 
 
 @dataclass(frozen=True)
@@ -107,21 +116,16 @@ class Migrator:
         self._directory = Path(directory)
 
     async def _ensure_table(self, conn: Any) -> None:
-        await conn.execute(_CREATE_MIGRATIONS_TABLE)
+        await conn.execute(CREATE_MIGRATIONS_TABLE)
 
-    async def applied_migrations(self) -> dict[str, str]:
-        """Return {version: checksum} of applied migrations."""
-
-        pool = await self._pool.pool()
-        async with pool.acquire() as conn:
-            await self._ensure_table(conn)
-            rows = await conn.fetch(
-                "select version, checksum from schema_migrations"
-            )
+    async def _applied_on(self, conn: Any) -> dict[str, str]:
+        await self._ensure_table(conn)
+        rows = await conn.fetch(
+            "select version, checksum from schema_migrations"
+        )
         return {str(row["version"]): str(row["checksum"]) for row in rows}
 
-    async def pending_migrations(self) -> list[MigrationFile]:
-        applied = await self.applied_migrations()
+    def _pending_for(self, applied: dict[str, str]) -> list[MigrationFile]:
         pending: list[MigrationFile] = []
 
         for migration in load_migrations(self._directory):
@@ -137,38 +141,70 @@ class Migrator:
 
         return pending
 
+    async def applied_migrations(self) -> dict[str, str]:
+        """Return {version: checksum} of applied migrations."""
+
+        pool = await self._pool.pool()
+        async with pool.acquire() as conn:
+            return await self._applied_on(conn)
+
+    async def pending_migrations(self) -> list[MigrationFile]:
+        applied = await self.applied_migrations()
+        return self._pending_for(applied)
+
     async def migrate(self) -> list[MigrationFile]:
         """Apply all pending migrations once, in order.
 
-        Stops at the first failure; the error names the failing migration.
-        Returns the migrations applied during this run.
+        The whole run is serialized with a PostgreSQL advisory lock so
+        concurrent bot processes cannot interleave migrations: a second
+        process waits for the lock and then finds nothing pending.  Stops at
+        the first failure; the error names the failing migration.  Returns
+        the migrations applied during this run.
         """
 
-        pending = await self.pending_migrations()
+        pool = await self._pool.pool()
         applied_now: list[MigrationFile] = []
 
-        for migration in pending:
-            label = f"{migration.version}_{migration.name}"
-            logger.info("Applying database migration %s", label)
-            sql = migration.path.read_text(encoding="utf-8")
+        async with pool.acquire() as conn:
+            await conn.execute("select pg_advisory_lock($1)", MIGRATION_LOCK_KEY)
             try:
-                pool = await self._pool.pool()
-                async with pool.acquire() as conn:
-                    async with conn.transaction():
-                        await conn.execute(sql)
-                        await conn.execute(
-                            "insert into schema_migrations "
-                            "(version, name, checksum) values ($1, $2, $3)",
-                            migration.version,
-                            migration.name,
-                            migration.checksum,
-                        )
-            except Exception as exc:
-                raise MigrationError(
-                    f"Migration {label} failed: {exc}"
-                ) from exc
-            applied_now.append(migration)
-            logger.info("Migration %s applied", label)
+                # Re-read applied state AFTER acquiring the lock: another
+                # process may have completed migrations while we waited.
+                applied = await self._applied_on(conn)
+                pending = self._pending_for(applied)
+
+                for migration in pending:
+                    label = f"{migration.version}_{migration.name}"
+                    logger.info("Applying database migration %s", label)
+                    sql = migration.path.read_text(encoding="utf-8")
+                    try:
+                        async with conn.transaction():
+                            await conn.execute(sql)
+                            await conn.execute(
+                                "insert into schema_migrations "
+                                "(version, name, checksum) values ($1, $2, $3)",
+                                migration.version,
+                                migration.name,
+                                migration.checksum,
+                            )
+                    except Exception as exc:
+                        raise MigrationError(
+                            f"Migration {label} failed: {exc}"
+                        ) from exc
+                    applied_now.append(migration)
+                    logger.info("Migration %s applied", label)
+            finally:
+                # Never let an unlock failure mask the real migration error.
+                try:
+                    await conn.execute(
+                        "select pg_advisory_unlock($1)", MIGRATION_LOCK_KEY
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to release migration advisory lock; "
+                        "it releases automatically when the session ends.",
+                        exc_info=True,
+                    )
 
         return applied_now
 

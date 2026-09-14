@@ -7,12 +7,15 @@ depends_on conditions, volumes and merge behavior of the local-AI overlay.
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
+
+_INTERPOLATION = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?)\}")
 
 
 def load_compose(name: str) -> dict:
@@ -83,6 +86,83 @@ class BaseComposeTests(unittest.TestCase):
             any("8080" in str(port) for port in bot.get("ports", [])),
             "health endpoints must be reachable",
         )
+
+
+class InterpolationTests(unittest.TestCase):
+    """Emulate Compose-variable interpolation with .env.example as the env.
+
+    Docker Compose resolves ${VAR:-default} from the project .env file and
+    unescapes $${VAR} to a literal ${VAR}.  This test verifies the rendered
+    values a real `docker compose config` would produce.
+    """
+
+    @staticmethod
+    def env_from_example() -> dict[str, str]:
+        content = (ROOT / ".env.example").read_text(encoding="utf-8")
+        env: dict[str, str] = {}
+        for line in content.splitlines():
+            match = re.match(r"^([A-Z][A-Z0-9_]*)=(.*)$", line.strip())
+            if match:
+                env[match.group(1)] = match.group(2)
+        return env
+
+    @classmethod
+    def render(cls, value, env):
+        if isinstance(value, str):
+            sentinel = "\0LITERAL_DOLLAR\0"
+            value = value.replace("$$", sentinel)
+
+            def substitute(match):
+                variable, _, default = match.group(1).partition(":-")
+                return env.get(variable, default)
+
+            value = _INTERPOLATION.sub(substitute, value)
+            return value.replace(sentinel, "$")
+        if isinstance(value, list):
+            return [cls.render(item, env) for item in value]
+        if isinstance(value, dict):
+            return {key: cls.render(item, env) for key, item in value.items()}
+        return value
+
+    def test_base_compose_renders_expected_environment(self):
+        env = self.env_from_example()
+        rendered = self.render(load_compose("compose.yaml"), env)
+        bot_env = rendered["services"]["bot"]["environment"]
+
+        self.assertEqual(bot_env["DATABASE_BACKEND"], "postgres")
+        self.assertEqual(
+            bot_env["DATABASE_URL"],
+            "postgresql://discord_builder:discord_builder@db:5432/discord_builder",
+        )
+
+        # $$-escaping stays literal: the container's own shell expands
+        # POSTGRES_USER/POSTGRES_DB at runtime (image-provided env).
+        healthcheck = rendered["services"]["db"]["healthcheck"]["test"]
+        self.assertEqual(
+            healthcheck,
+            ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"],
+        )
+
+        self.assertEqual(
+            rendered["services"]["db"]["environment"]["POSTGRES_PASSWORD"],
+            "discord_builder",
+            "documented dev default; users are told to change it",
+        )
+
+    def test_overlay_renders_ollama_wiring(self):
+        env = self.env_from_example()
+        rendered = self.render(load_compose("compose.local-ai.yaml"), env)
+        ollama_model = rendered["services"]["ollama-model"]
+
+        self.assertEqual(ollama_model["environment"]["MODEL"], "qwen3:4b")
+        self.assertEqual(
+            ollama_model["command"],
+            ['ollama pull "${MODEL}"'],
+        )
+
+        bot_env = rendered["services"]["bot"]["environment"]
+        self.assertEqual(bot_env["OLLAMA_BASE_URL"], "http://ollama:11434")
+        self.assertEqual(bot_env["AI_PROVIDER"], "ollama")
 
 
 class LocalAiOverlayTests(unittest.TestCase):

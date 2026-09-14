@@ -9,14 +9,14 @@ parameters (e.g. guild isolation, no string interpolation).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self
 
 
 class FakeTransaction:
     def __init__(self) -> None:
         self.commits = 0
 
-    async def __aenter__(self) -> "FakeTransaction":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
