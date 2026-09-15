@@ -22,3 +22,12 @@ class StorageUnavailableError(StorageError):
 
 class MigrationError(StorageError):
     """A migration failed or the schema version table is inconsistent."""
+
+
+class MigrationToolError(StorageError):
+    """The Supabase → PostgreSQL migration tool could not (safely) continue.
+
+    Raised for configuration problems, unreadable/invalid exports, missing
+    migrations and schema mismatches.  Messages are safe to print: they never
+    contain credentials and never imply that data was modified.
+    """

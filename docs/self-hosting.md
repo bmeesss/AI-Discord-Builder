@@ -160,6 +160,175 @@ blijft volledig bij de Discord permission/security/executor-laag; opslag
 bewaart alleen state en history. Elke repository-methode filtert server-side
 op `guild_id` (guild isolation).
 
+## Migrating from Supabase
+
+Bestaande installaties verplaatsen hun data met de ingebouwde migratietool naar
+de lokale PostgreSQL-database. De tool is **additief** en **read-only ten
+opzichte van Supabase**:
+
+- er wordt **niets uit Supabase verwijderd of gewijzigd** — de export leest
+  alleen;
+- bestaande PostgreSQL-data wordt **nooit** gedelete, getruncate of gedropt;
+  rijen die al bestaan worden overgeslagen;
+- de actieve backend wordt **nooit automatisch omgezet**: jij zet
+  `DATABASE_BACKEND=postgres` wanneer jij daar klaar voor bent;
+- het schema wordt niet aangepast — dat blijft
+  `python -m database migrate`.
+
+### Aanbevolen flow
+
+1. **Stop writes** — zet de bot uit (`docker compose stop bot`) zodat er tijdens
+   de export niets meer wordt weggeschreven.
+2. **Export Supabase**:
+
+   ```bash
+   DATABASE_BACKEND=supabase python -m database export-supabase
+   # of met een eigen locatie:
+   DATABASE_BACKEND=supabase python -m database export-supabase --output backups/my-export
+   ```
+
+   Dit vereist alleen `SUPABASE_URL`/`SUPABASE_KEY`; PostgreSQL hoeft niet te
+   draaien. Alle tabellen worden **gepagineerd** gelezen (PostgREST levert
+   maximaal 1000 rijen per request, dus een grote tabel wordt in meerdere
+   pages opgehaald).
+3. **Verify export**:
+
+   ```bash
+   python -m database verify-export backups/supabase-export-20260915-120000
+   ```
+
+   Controleert JSONL-syntax, aantallen, dubbele id's, verplichte velden,
+   relationele consistentie, checksums en secrets. Dit commando wijzigt niets.
+4. **Backup PostgreSQL** — verplicht vóór de import (zie
+   [Backups](#backups)).
+5. **Dry-run import** — schrijft niets, rapporteert per tabel wat er zou
+   gebeuren:
+
+   ```bash
+   DATABASE_BACKEND=postgres python -m database import-postgres \
+     backups/supabase-export-20260915-120000 --dry-run
+   ```
+6. **Perform import** — vraagt interactief bevestiging, of gebruik `--yes`:
+
+   ```bash
+   DATABASE_BACKEND=postgres python -m database import-postgres \
+     backups/supabase-export-20260915-120000 --yes
+   ```
+7. **Verify counts** — de import draait automatisch een verification pass
+   (aantallen, foreign keys, timestamps, JSONB, guild-scope) en print
+   `inserted`/`skipped`/`errors` per tabel.
+8. **Change `DATABASE_BACKEND=postgres`** in `.env` (en zet `DATABASE_URL`
+   goed).
+9. **Restart bot**: `docker compose up -d` (of `docker compose restart bot`).
+10. **Verify `/readyz`** — `curl -fsS http://127.0.0.1:8080/readyz` moet 200
+    geven met `components.database.ok=true`.
+11. **Test `/ask` en rollback** — voer één onschuldige actie uit en draai die
+    terug met `/rollback amount:1`.
+
+Supabase-data blijft na dit alles onaangeroemd staan: ruim die pas op nadat je
+PostgreSQL-installatie naar tevredenheid draait.
+
+### Exportstructuur
+
+```text
+backups/supabase-export-YYYYMMDD-HHMMSS/
+  manifest.json
+  actions.jsonl
+  conversations.jsonl
+  memories.jsonl
+  memory_embeddings.jsonl
+  conversation_summaries.jsonl
+  server_analysis.jsonl
+  feedback.jsonl
+  templates.jsonl
+  prompt_versions.jsonl
+```
+
+Elke `.jsonl`-file bevat één JSON-object per regel, exact zoals PostgREST de
+rij leverde. `manifest.json` bevat formatversie, export-timestamp, bron
+(project-host, nooit de API-key), schema/versie-informatie (inclusief de
+migration-checksums), per-tabel aantallen, bestandsnamen, SHA-256-checksums,
+guild-verdeling en de uitkomst van de secret-scan. Het manifest wordt als
+laatste geschreven: een map zonder geldig manifest is per definitie incomplete.
+
+### Conflictstrategie per tabel
+
+| Tabel | Conflict key | Gedrag | Reden |
+| --- | --- | --- | --- |
+| `actions` | geen (id wordt niet meegenomen) | rij overslaan wanneer `guild_id` + `user_id` + `action_type` + `data` + `created_at` al bestaan | `actions.id` is `bigint generated always as identity`; zie hieronder |
+| `prompt_versions` | `(name, version)` | `on conflict (name, version) do nothing` | `unique (name, version)` is de business key in beide schema's |
+| `conversations` | `id` | `on conflict (id) do nothing` | append-only log; hetzelfde id is dezelfde rij |
+| `memories` | `id` | `on conflict (id) do nothing`, plus een expliciete pre-check op `(guild_id, user_id, memory_type, memory_key)` voor actieve memories | `memories_unique_active_idx` is een *partial* unique index en kan niet in `on conflict` worden gebruikt; een conflict wordt gerapporteerd en overgeslagen, nooit overschreven |
+| `memory_embeddings` | `id` | `on conflict (id) do nothing` | stabiele identiteit; parent (`memories.id`) wordt vooraf gecontroleerd |
+| `conversation_summaries` | `id` | `on conflict (id) do nothing` | stabiele identiteit |
+| `server_analysis` | `id` | `on conflict (id) do nothing` | stabiele identiteit (historisch snapshot) |
+| `feedback` | `id` | `on conflict (id) do nothing` | stabiele identiteit |
+| `templates` | `id` | `on conflict (id) do nothing` | stabiele identiteit |
+
+`on conflict do nothing` wordt alleen gebruikt waar de conflict key de
+identiteit van de rij is. Conflicten worden **nooit stilgezwegen**: ze staan in
+het rapport als `skipped`, met voorbeelden, en `verify-export` meldt dubbele
+business keys en ontbrekende dependencies expliciet.
+
+### Actions en rollback-history
+
+`database/postgres/migrations/001_core_tables.sql` definieert `actions.id` als
+`bigint generated always as identity`. Het legacy Supabase-id wordt daarom
+**niet** meegenomen: PostgreSQL genereert een nieuw id. Alle inhoud blijft
+behouden (`guild_id`, `user_id`, `action_type`, `data`, `created_at`) en de
+rijen worden in chronologische volgorde ingevoegd, zodat de gegenereerde ids
+de history-volgorde volgen. Rollback (`/rollback`) leest de nieuwste rijen via
+`created_at desc, id desc` en blijft daardoor ongewijzigd werken; dat is met
+integratietests tegen een echte PostgreSQL gedekt.
+
+Id's die geen UUID zijn (bijvoorbeeld een legacy integer `conversations.id`)
+worden deterministisch (uuid5) vervangen; verwijzingen ernaar
+(`feedback.conversation_id`) worden automatisch meevertaald, zodat een
+herhaalde import dezelfde ids oplevert.
+
+### Idempotentie, batches en herstel
+
+- **Idempotent**: dezelfde export opnieuw importeren levert `inserted: 0,
+  skipped: <n>, errors: 0` op — er ontstaan geen duplicaten.
+- **Batches**: rijen worden per tabel in batches verwerkt (standaard 500,
+  `--batch-size`), elke batch in een eigen transactie.
+- **Herstel na een fout**: een mislukte batch rolt zichzelf terug; eerder
+  gecommitte batches blijven staan. Er worden geen halve rijen weggeschreven.
+  Transiente databasefouten (serialization failure, deadlock, verbindingsverlies)
+  worden veilig herprobeerd; datafouten niet.
+- **Opnieuw uitvoeren** na een fout is veilig: wat al staat wordt
+  overgeslagen.
+
+### Secrets
+
+De export bevat **alleen rijen uit de database** — nooit `DISCORD_TOKEN`,
+`GROQ_API_KEY`, `OPENAI_API_KEY`, `SUPABASE_KEY`, database-wachtwoorden of
+andere credentials. Voor de export succesvol wordt verklaard, scant de tool
+elke rij op bekende secret-waarden uit de omgeving en op token-patronen
+(Discord/OpenAI/Groq/JWT/private key/DSN met wachtwoord). Een `critical`
+bevinding maakt de export **niet** succesvol; een verdachte *key name*
+(`token`, `api_key`, `password`, ...) geeft een waarschuwing die in manifest,
+validator en importsamenvatting terugkomt. Foutmeldingen en logs worden
+altijd geredigeerd (`***`), DSN's worden gemaskeerd.
+
+### Backups vóór de import
+
+De import is additief maar onomkeerbaar zonder backup. Maak er dus altijd een:
+
+```bash
+# Backup (Docker)
+docker compose exec -T db \
+  pg_dump -U discord_builder --clean --if-exists discord_builder \
+  > backup-voor-import-$(date +%F).sql
+
+# Terugzetten in een database die je eerst leegt/herstelt
+docker compose exec -T db \
+  psql -U discord_builder discord_builder < backup-voor-import-2026-09-15.sql
+```
+
+`pg_dump`/`pg_restore` zijn de enige ondersteunde backuproute; de migratietool
+bouwt geen eigen backup-systeem en reset nooit een bestaande database.
+
 ## Local AI (optioneel)
 
 Zonder local AI start je gewoon `docker compose up -d`; er draait dan geen
@@ -233,6 +402,11 @@ docker compose logs -f bot
 | `/readyz` geeft 503 met `components.database.ok=false` | Database onbereikbaar; bot blijft draaien maar is niet ready. Los de db-connectie op. |
 | Bot start niet, `Failed to load Discord extensions` | Controleer `docker compose logs bot` voor de echte fout. |
 | Rollback zegt “No history found” | Er is geen opgeslagen history (nieuwe db) of de database was onbereikbaar tijdens het opslaan. |
+| `export-supabase` zegt `needs DATABASE_BACKEND=supabase` | De actieve backend is `postgres`. Exporteer met `DATABASE_BACKEND=supabase` (of alleen `SUPABASE_URL`/`SUPABASE_KEY` in de omgeving). |
+| `import-postgres` zegt `pending migrations` | Draai eerst `python -m database migrate` (of zet `DB_MIGRATE_ON_STARTUP=true`). De migratietool past het schema nooit aan. |
+| `verify-export` meldt `secret` | De export bevat een credential-achtige waarde. Verwijder de waarde uit Supabase en exporteer opnieuw. |
+| Import rapporteert `dependency_problems` | Rijen verwijzen naar een parent die ontbreekt (bijv. `memory_embeddings` zonder `memories`-rij). De rij wordt overgeslagen en genoemd in het rapport. |
+| Import rapporteert `invalid` | Een rij voldoet niet aan het schema (type/verplicht veld/CHECK-constraint). Controleer het getoonde regelnummer in het `.jsonl`-bestand. |
 | Data “weg” na recreate | Alleen als het volume is verwijderd. `docker compose down -v` verwijdert volumes; gebruik `down` zonder `-v`. |
 
 ## Health endpoints
@@ -315,6 +489,12 @@ Zonder Docker-daemon in ontwikkelomgevingen gebeurt container-validatie zo:
   (`status`/`migrate`), repository-roundtrips, guild isolation, bot/db
   restart-analoga, connection-loss recovery, concurrente migratie-runs,
   startup-failure modes. Zie `tests/integration/test_startup_flow.py`.
+- **Wel live getest** (tegen echte PostgreSQL): de Supabase → PostgreSQL
+  migratietool — import in een lege database, rij-aantallen, relaties,
+  tweede import (idempotentie), JSONB/timestamps, guild isolation,
+  actions-history/rollback, dry-run zonder writes en de CLI-flow
+  `verify-export` → `--dry-run` → `--yes`.
+  Zie `tests/integration/test_migration_postgres_integration.py`.
 - **Niet live getest** (geen Docker-daemon beschikbaar tijdens ontwikkeling):
   `docker compose config`, `docker compose up`, container-level restarts en
   Ollama-containerstart. Dit is statisch gevalideerd (YAML-structuur,

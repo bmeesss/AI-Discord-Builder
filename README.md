@@ -89,6 +89,15 @@ python -m database migrate
 python -m database status
 ```
 
+Migreren van Supabase naar PostgreSQL (optioneel, additief):
+
+```bash
+python -m database export-supabase
+python -m database verify-export <export-path>
+python -m database import-postgres <export-path> --dry-run
+python -m database import-postgres <export-path> --yes
+```
+
 De bot controleert bij startup of de database bereikbaar is en het schema
 up-to-date is; bij een fout stopt de startup direct met een duidelijke
 melding in plaats van later willekeurig te crashen.
@@ -97,6 +106,57 @@ De opslaglaag slaat alleen state/history op en bepaalt **nooit** of een
 Discord-actie is toegestaan — autorisatie blijft bij de
 permission/executor-laag. Repository-methodes filteren server-side op
 `guild_id`.
+
+## Migrating from Supabase
+
+Draai je nog op Supabase en wil je naar de lokale PostgreSQL? Gebruik de
+ingebouwde migratietool (`python -m database`). De tool is additief: er wordt
+niets uit Supabase verwijderd, bestaande PostgreSQL-data blijft staan en de
+actieve backend wordt nooit automatisch omgezet.
+
+```bash
+# 1. Stop writes: zet de bot uit zodat er niets meer wordt weggeschreven.
+docker compose stop bot
+
+# 2. Export Supabase (alleen SUPABASE_URL/SUPABASE_KEY nodig, gepagineerd).
+DATABASE_BACKEND=supabase python -m database export-supabase
+
+# 3. Verify export (read-only: syntax, aantallen, relaties, secrets).
+python -m database verify-export backups/supabase-export-20260915-120000
+
+# 4. Backup PostgreSQL — verplicht vóór de import.
+docker compose exec -T db \
+  pg_dump -U discord_builder --clean --if-exists discord_builder \
+  > backup-voor-import-$(date +%F).sql
+
+# 5. Dry-run import: rapporteert per tabel, schrijft niets.
+DATABASE_BACKEND=postgres python -m database import-postgres \
+  backups/supabase-export-20260915-120000 --dry-run
+
+# 6. Import (interactieve bevestiging, of --yes voor automation).
+DATABASE_BACKEND=postgres python -m database import-postgres \
+  backups/supabase-export-20260915-120000 --yes
+
+# 7. Controleer daarna de gerapporteerde aantallen (verification pass),
+# 8. zet DATABASE_BACKEND=postgres in .env, 9. herstart de bot,
+# 10. controleer /readyz en 11. test /ask en /rollback amount:1.
+```
+
+De export bestaat uit `manifest.json` plus één `.jsonl`-file per tabel
+(`actions`, `conversations`, `memories`, `memory_embeddings`,
+`conversation_summaries`, `server_analysis`, `feedback`, `templates`,
+`prompt_versions`) met checksums in het manifest. De import is idempotent:
+dezelfde export opnieuw importeren levert `inserted: 0, skipped: <n>,
+errors: 0` op. `actions.id` is in PostgreSQL een identity-kolom en wordt
+opnieuw gegenereerd; inhoud en chronologie (en dus rollback) blijven behouden.
+Exportbestanden bevatten nooit secrets — de scan blokkeert de export als dat
+wel zo is. Volledige details, conflictstrategie per tabel en troubleshooting
+staan in [docs/self-hosting.md](docs/self-hosting.md#migrating-from-supabase).
+
+De CI-stappen voor deze tests (unit- en PostgreSQL-integratietests) staan in
+[docs/ci-migration-tests.patch](docs/ci-migration-tests.patch). Pas die toe met
+`git apply docs/ci-migration-tests.patch` als `.github/workflows/ci.yml` nog
+niet is bijgewerkt.
 
 ## Cloud AI configureren
 
@@ -290,3 +350,4 @@ DATABASE_URL=postgresql://discord_builder:discord_builder@localhost:5432/discord
 - De opslaglaag kent geen per-guild settings-tabel; guild-specifieke bot-
   instellingen leven nu in environment/config (gedocumenteerd, geen redesign).
 - Een publiek webdashboard is nog niet geïmplementeerd.
+- De Supabase → PostgreSQL migratietool exporteert en importeert data, maar synchroniseert niet: hij is bedoeld voor een eenmalige overstap en is niet transactioneel consistent met een Supabase-project dat ondertussen door blijft schrijven (stop writes vóór de export).

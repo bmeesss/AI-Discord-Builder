@@ -10,3 +10,6 @@ data/
 *.db
 *.sqlite
 .continue/mcpServers/new-mcp-server.yaml
+
+# Migration exports contain conversation/memory data — never commit them.
+backups/
