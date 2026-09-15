@@ -264,8 +264,39 @@ class CliAgainstFreshDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_cli_masks_dsn_password(self):
         parsed = urlparse(self.dsn)
         _rc, out = await asyncio.to_thread(self.run_cli, "status")
+
+        dsn_line = next(
+            line for line in out.splitlines() if line.strip().startswith("dsn:")
+        )
+        printed = urlparse(dsn_line.split(":", 1)[1].strip())
+
+        # Everything except the password stays visible, so an operator can
+        # still see which database the CLI is talking to.
+        self.assertEqual(
+            (
+                printed.scheme,
+                printed.username,
+                printed.hostname,
+                printed.port,
+                printed.path,
+            ),
+            (
+                parsed.scheme,
+                parsed.username,
+                parsed.hostname,
+                parsed.port,
+                parsed.path,
+            ),
+        )
+        self.assertEqual(printed.password, "***" if parsed.password else None)
+
         if parsed.password:
-            self.assertNotIn(parsed.password, out)
+            # The leak to guard against is a raw 'user:password@host'
+            # authority.  Do not scan the output for the bare password:
+            # CI (and .env.example) use the same value for user, password and
+            # database, so the *masked* line legitimately repeats it as the
+            # username and database name.
+            self.assertNotIn(f":{parsed.password}@", out)
 
 
 if __name__ == "__main__":
