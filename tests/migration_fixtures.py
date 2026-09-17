@@ -267,6 +267,44 @@ def conflicting_rows() -> dict[str, list[dict]]:
     return rows
 
 
+def duplicate_of_existing_rows(
+    guild_id: str,
+    prompt_name: str,
+    memory_key: str,
+) -> dict[str, list[dict]]:
+    """Rows that collide with rows the target database already contains.
+
+    ``prompt_versions`` collides on its business key (name, version); the
+    active memory collides with the partial unique index
+    ``memories_unique_active_idx`` (guild, user, type, key where deleted_at is
+    null).  The soft-deleted memory with the same key does not collide and
+    must be imported.
+    """
+
+    rows = empty_rows()
+    rows["prompt_versions"] = [
+        _prompt_version(prompt_name, "1", str(uuid.uuid4()))
+    ]
+    rows["memories"] = [
+        _memory(
+            str(uuid.uuid4()),
+            guild_id,
+            memory_key,
+            "waarde uit supabase",
+            USER_A,
+        ),
+        _memory(
+            str(uuid.uuid4()),
+            guild_id,
+            memory_key,
+            "oude waarde",
+            USER_A,
+        ),
+    ]
+    rows["memories"][1]["deleted_at"] = "2026-01-15T10:00:00+00:00"
+    return rows
+
+
 def missing_dependency_rows() -> dict[str, list[dict]]:
     """An embedding whose memory is absent, plus a dangling soft reference."""
 

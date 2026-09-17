@@ -45,7 +45,9 @@ from tests.migration_fixtures import (
     SUMMARY_ID,
     TEMPLATE_ID,
     TEMPLATE_ID_2,
+    USER_A,
     base_rows,
+    duplicate_of_existing_rows,
     large_rows,
     make_export,
     missing_dependency_rows,
@@ -264,6 +266,87 @@ class MigrationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         for name in IMPORT_ORDER:
             self.assertEqual(await self.delta(name), len(self.rows[name]), name)
+
+    async def test_rows_that_already_exist_are_skipped_not_overwritten(self):
+        """A row already in the target wins: business key and partial index."""
+
+        prompt_name = f"existing-plan-{self.suffix}"
+        memory_key = f"theme-{self.suffix}"
+        existing_prompt = str(uuid.uuid4())
+        pool = await self.pool.pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "insert into prompt_versions (id, name, version, "
+                "system_prompt, active) values ($1, $2, '1', "
+                "'bestaat al in postgres', false)",
+                _as_uuid(existing_prompt),
+                prompt_name,
+            )
+            await conn.execute(
+                "insert into memories (guild_id, user_id, memory_key, "
+                "memory_value, memory_type) values ($1, $2, $3, "
+                "'bestaat al in postgres', 'preference')",
+                self.guild_a,
+                USER_A,
+                memory_key,
+            )
+
+        try:
+            directory, _client = make_export(
+                self.tmp / "duplicates",
+                duplicate_of_existing_rows(
+                    self.guild_a, prompt_name, memory_key
+                ),
+            )
+            importer = PostgresImporter(
+                self.pool,
+                directory,
+                ImportOptions(assume_yes=True, verify=False),
+            )
+            report = await importer.run()
+
+            self.assertEqual(report.errors, [])
+            # (name, version) already exists -> skipped, never overwritten
+            self.assertEqual(report.tables["prompt_versions"].inserted, 0)
+            self.assertEqual(
+                report.tables["prompt_versions"].skipped_existing, 1
+            )
+            # active memory collides with memories_unique_active_idx, the
+            # soft-deleted row with the same key is imported
+            self.assertEqual(report.tables["memories"].skipped_conflict, 1)
+            self.assertEqual(report.tables["memories"].inserted, 1)
+
+            async with pool.acquire() as conn:
+                prompt = await conn.fetchrow(
+                    "select system_prompt from prompt_versions where id = $1",
+                    _as_uuid(existing_prompt),
+                )
+                self.assertEqual(
+                    prompt["system_prompt"], "bestaat al in postgres"
+                )
+                active = await conn.fetch(
+                    "select memory_value from memories where guild_id = $1 "
+                    "and memory_key = $2 and deleted_at is null",
+                    self.guild_a,
+                    memory_key,
+                )
+                self.assertEqual(
+                    [row["memory_value"] for row in active],
+                    ["bestaat al in postgres"],
+                )
+                history = await conn.fetchval(
+                    "select count(*) from memories where guild_id = $1 "
+                    "and memory_key = $2 and deleted_at is not null",
+                    self.guild_a,
+                    memory_key,
+                )
+                self.assertEqual(history, 1)
+        finally:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "delete from prompt_versions where id = $1",
+                    _as_uuid(existing_prompt),
+                )
 
     async def test_jsonb_and_timestamps_are_preserved(self):
         await self.import_export()

@@ -227,6 +227,29 @@ class NormalisationTests(unittest.TestCase):
         self.assertTrue(any("data" in error for error in errors))
         self.assertTrue(any("created_at" in error for error in errors))
 
+    def test_structured_value_in_a_text_column_is_reported_not_coerced(self):
+        """A dict in a text column (conversations.risk) is a data problem.
+
+        Neither backend writes ``conversations.risk``; if a legacy Supabase
+        row still holds a structured value there the row is reported as
+        invalid instead of being silently coerced or imported half-filled.
+        """
+
+        _values, errors = normalize_row(
+            TABLES["conversations"],
+            {
+                "id": "22222222-2222-4222-8222-222222222222",
+                "guild_id": "42",
+                "message": "plan een hub",
+                "risk": {"level": "low"},
+                "created_at": "2026-01-01T10:00:00+00:00",
+            },
+        )
+        self.assertTrue(
+            any("risk" in error for error in errors),
+            f"expected an error about risk, got {errors}",
+        )
+
     def test_invalid_uuid_is_reported(self):
         _values, errors = normalize_row(
             TABLES["feedback"],
