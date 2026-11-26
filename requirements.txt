@@ -6,7 +6,5 @@ aiohttp>=3.9.0,<4
 flask>=3.0.0,<4
 # Kept for deployments that serve web.app separately; main.py uses Flask directly.
 gunicorn>=22.0.0,<24
-# Optional persistence adapter used by the existing repository.
-supabase>=2.0.0,<3
-# Async PostgreSQL driver — default self-hosting storage backend.
-asyncpg>=0.29.0,<1
+# NOTE: the bot is database-free — there are no database drivers here on
+# purpose.  Persistence uses local JSON files (see storage/json_store.py).

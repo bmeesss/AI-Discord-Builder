@@ -23,25 +23,25 @@ class ReadinessTests(unittest.TestCase):
 
     def test_ready_after_discord_and_components_ok(self):
         web_app.set_ready(True)
-        web_app.set_component("database", True, "postgres ok")
+        web_app.set_component("storage", True, "json storage ok")
 
         payload, status = web_app.evaluate_readiness()
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "ready")
 
-    def test_database_down_blocks_readiness_even_when_discord_ready(self):
+    def test_storage_down_blocks_readiness_even_when_discord_ready(self):
         web_app.set_ready(True)
-        web_app.set_component("database", False, "connection refused")
+        web_app.set_component("storage", False, "connection refused")
 
         payload, status = web_app.evaluate_readiness()
         self.assertEqual(status, 503)
         self.assertEqual(payload["status"], "not ready")
-        self.assertEqual(payload["components"]["database"], "unhealthy")
+        self.assertEqual(payload["components"]["storage"], "unhealthy")
 
     def test_component_detail_is_truncated(self):
-        web_app.set_component("database", False, "x" * 1000)
+        web_app.set_component("storage", False, "x" * 1000)
         self.assertEqual(
-            len(web_app.get_components()["database"]["detail"]),
+            len(web_app.get_components()["storage"]["detail"]),
             200,
         )
 
@@ -50,7 +50,7 @@ class ReadinessTests(unittest.TestCase):
 
         web_app.set_ready(True)
         web_app.set_component(
-            "database",
+            "storage",
             False,
             "postgresql://user:secret@db-host:5432/prod password auth failed",
         )
@@ -61,7 +61,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertNotIn("secret", serialized)
         self.assertNotIn("db-host", serialized)
         self.assertNotIn("postgresql://", serialized)
-        self.assertEqual(payload["components"]["database"], "unhealthy")
+        self.assertEqual(payload["components"]["storage"], "unhealthy")
 
 
 class HttpEndpointTests(unittest.TestCase):
@@ -84,13 +84,13 @@ class HttpEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
 
         web_app.set_ready(True)
-        web_app.set_component("database", True, "ok")
+        web_app.set_component("storage", True, "ok")
         response = self.client.get("/readyz")
         self.assertEqual(response.status_code, 200)
 
-    def test_readyz_503_when_database_unhealthy(self):
+    def test_readyz_503_when_storage_unhealthy(self):
         web_app.set_ready(True)
-        web_app.set_component("database", False, "timeout")
+        web_app.set_component("storage", False, "timeout")
         response = self.client.get("/readyz")
         self.assertEqual(response.status_code, 503)
 

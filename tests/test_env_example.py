@@ -17,10 +17,10 @@ SCAN_DIRS = (
     "ai",
     "builder",
     "commands",
-    "database",
     "security",
     "services",
     "setup",
+    "storage",
     "web",
 )
 SCAN_FILES = ("config.py", "main.py")
@@ -35,13 +35,13 @@ _PATTERNS = (
 # Read by code but documented as commented-out optional lines in .env.example.
 # (empty means: everything must be documented as an active line or via the
 # commented-opt-in mechanism below)
-_COMMENTED_OPT_INS = {"OPENAI_BASE_URL", "SUPABASE_URL", "SUPABASE_KEY", "PORT"}
+_COMMENTED_OPT_INS = {"OPENAI_BASE_URL", "PORT"}
 
 # Documented in .env.example but only consumed by Compose interpolation.
 _COMPOSE_ONLY = {"OLLAMA_HOST_PORT"}
 
 # Test-only flags; deliberately not part of .env.example.
-_TEST_ONLY = {"RUN_OLLAMA_TESTS", "RUN_POSTGRES_TESTS", "RUN_SUPABASE_TESTS"}
+_TEST_ONLY = {"RUN_OLLAMA_TESTS"}
 
 
 def code_env_keys() -> set[str]:
@@ -112,23 +112,22 @@ class EnvExampleTests(unittest.TestCase):
         duplicates = {key for key in seen if seen.count(key) > 1}
         self.assertEqual(duplicates, set())
 
-    def test_postgres_defaults_are_consistent_with_compose(self):
-        """The documented DSN must match the Compose db service wiring."""
+    def test_documentation_is_database_free(self):
+        """.env.example and compose.yaml must not reference any database."""
 
-        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        for name in (".env.example", "compose.yaml", "render.yaml"):
+            content = (ROOT / name).read_text(encoding="utf-8")
+            for banned in (
+                "DATABASE_URL=",
+                "DATABASE_BACKEND=",
+                "SUPABASE_URL=",
+                "POSTGRES_",
+                "postgresql://",
+            ):
+                self.assertNotIn(banned, content, f"{name} still references {banned}")
+
         example = (ROOT / ".env.example").read_text(encoding="utf-8")
-
-        self.assertIn(
-            "postgresql://discord_builder:discord_builder@db:5432/discord_builder",
-            compose,
-        )
-        self.assertIn(
-            "DATABASE_URL=postgresql://discord_builder:discord_builder@db:5432/discord_builder",
-            example,
-        )
-        for variable in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
-            self.assertIn(f"{variable}=", example)
-            self.assertIn(variable, compose)
+        self.assertIn("DATA_DIR=", example)
 
 
 if __name__ == "__main__":

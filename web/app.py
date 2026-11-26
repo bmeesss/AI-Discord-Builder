@@ -2,7 +2,7 @@
 
 /healthz — process liveness only (never exposes secrets).
 /readyz  — readiness: Discord runtime is up AND every required runtime
-           component (database backend, migrations) reported ready.
+           component (local JSON storage) reported ready.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
-    """Readiness: Discord runtime and required components (database)."""
+    """Readiness: Discord runtime and required components (storage)."""
 
     payload, status = evaluate_readiness()
     return jsonify(payload), status

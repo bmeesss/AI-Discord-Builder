@@ -4,8 +4,8 @@ builder/history.py
 Persistent Discord action history.
 
 This module is a thin async interface between the builder system and the
-configured storage backend (PostgreSQL by default, Supabase optional).
-Storage never decides whether an action is allowed; it only keeps rollback
+configured storage backend (local JSON files; no database).  Storage never
+decides whether an action is allowed; it only keeps rollback
 history.
 
 Supports:
@@ -22,7 +22,7 @@ pre-existing quirk is preserved intentionally; see docs/self-hosting.md.
 
 import logging
 
-from database import get_storage
+from storage import get_storage
 
 
 logger = logging.getLogger(

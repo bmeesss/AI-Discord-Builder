@@ -1,41 +1,23 @@
-# Self-hosting baseline: Discord bot + PostgreSQL.
+# Self-hosting baseline: just the Discord bot — no database, no extra services.
+# Persistence (rollback history, conversations) is stored in local JSON files
+# inside the named volume `bot_data` (see DATA_DIR).
 # Ollama is deliberately not part of this file (see compose.local-ai.yaml).
 # Start with: docker compose up -d
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-discord_builder}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-discord_builder}
-      POSTGRES_DB: ${POSTGRES_DB:-discord_builder}
-    volumes:
-      # Named volume: data survives container restart/recreate.
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
   bot:
     build: .
     env_file:
       - .env
     environment:
-      # .env values win when set; otherwise default to the local db service.
-      DATABASE_BACKEND: ${DATABASE_BACKEND:-postgres}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://discord_builder:discord_builder@db:5432/discord_builder}
+      # JSON files live on the named volume so they survive container
+      # restarts and image rebuilds (but not `docker compose down -v`).
+      DATA_DIR: ${DATA_DIR:-/app/data}
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
+    volumes:
+      - bot_data:/app/data
     ports:
       # Host port : container port both follow WEB_PORT (the bot binds there).
       - "127.0.0.1:${WEB_PORT:-8080}:${WEB_PORT:-8080}"
 
 volumes:
-  postgres_data:
+  bot_data:

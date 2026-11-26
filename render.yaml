@@ -1,21 +1,25 @@
-# Render Blueprint for AI-Discord-Builder (self-hosted).
+# Render Blueprint for AI-Discord-Builder — 100% FREE, database-free.
 #
-# Architecture choice (see docs/render.md for the full rationale):
-# * The bot keeps a persistent Discord Gateway connection, so it needs an
-#   always-on instance. This is a paid Web Service (`plan: 0.5c-512mb`), NOT a
-#   Free instance (Free web services spin down after 15 minutes without
-#   inbound traffic and are not suitable for production) and NOT a Background
-#   Worker (workers have no public URL and no health checks, so UptimeRobot
-#   cannot monitor them).
-# * The Web Service exposes a public healthcheck URL:
-#   - /healthz — process liveness (Render `healthCheckPath`, also used for
-#     zero-downtime deploy gating);
-#   - /readyz  — true readiness (Discord runtime + database). Monitor this
-#     one with UptimeRobot; it returns HTTP 503 when the bot or the database
-#     is not operational.
-# * PostgreSQL runs as a managed Render database in the same region; the
-#   connection string is injected automatically. Migrations run automatically
-#   at startup (DB_MIGRATE_ON_STARTUP=true).
+# What this deploys: ONE Free web service that runs the Dockerfile in this
+# repository. No databases, no paid resources, no extra services.
+#
+# ── IMPORTANT: how Render Free actually behaves (verified against the current
+#    Render docs, https://render.com/docs/free) ─────────────────────────────
+# * A Free web service SPINS DOWN after 15 minutes without INBOUND traffic
+#   (HTTP requests or WebSocket messages on existing inbound connections).
+# * The Discord Gateway connection is an OUTBOUND WebSocket from the service.
+#   It does NOT count as inbound traffic and therefore does NOT keep the
+#   service awake on its own.
+# * In practice the bot stays online because UptimeRobot Free polls
+#   https://<name>.onrender.com/readyz every 5 minutes (inbound HTTP). That
+#   monitoring IS the keep-alive; if it stops for >15 minutes the service
+#   spins down and the bot is offline until the next poll triggers a spin-up
+#   (about 1 minute).
+# * All local files (the JSON history in DATA_DIR) are on an ephemeral disk:
+#   they are LOST on every redeploy, restart or spin-down.
+# * Render may restart a Free web service at any time, and may suspend free
+#   services that initiate unusually high outbound traffic (e.g. calling AI
+#   APIs continuously) — see "Free web services" in the Render docs.
 #
 # Deployment steps: see docs/render.md. In short: push this repo to GitHub,
 # then Render Dashboard -> New -> Blueprint -> select the repo. Render asks
@@ -27,9 +31,9 @@ services:
   - type: web
     name: ai-discord-builder
     runtime: docker            # builds from the Dockerfile in this repository
-    plan: 0.5c-512mb           # smallest always-on (paid) compute plan
+    plan: free                 # €0 — the only plan this project uses
     numInstances: 1            # exactly ONE instance: a bot must not run twice
-    healthCheckPath: /healthz  # liveness; monitor /readyz with UptimeRobot
+    healthCheckPath: /healthz  # liveness; UptimeRobot monitors /readyz
     autoDeployTrigger: checksPass  # deploy only when the GitHub CI checks pass
     envVars:
       # --- Secrets: Render prompts for these once and never stores them here.
@@ -43,21 +47,10 @@ services:
       # ("ollama" needs a reachable Ollama server and is not practical on Render.)
       - key: AI_PROVIDER
         sync: false
-      # --- Database: wired automatically from the managed Postgres instance.
-      - key: DATABASE_BACKEND
-        value: postgres
-      - key: DATABASE_URL
-        fromDatabase:
-          name: ai-discord-builder-db
-          property: connectionString
+      # --- Local JSON storage lives in the container's ephemeral filesystem.
+      - key: DATA_DIR
+        value: /app/data
 
-databases:
-  - name: ai-discord-builder-db
-    # Smallest paid compute plan: no expiry and no idle spin-down.
-    # For quick experiments you can use `plan: free`, but free Render Postgres
-    # databases expire 30 days after creation — never use free for production.
-    plan: 0.1c-256mb
-    databaseName: discord_builder
-    user: discord_builder
-    # Same region as the service (both default to oregon). Change both together
-    # if you want e.g. frankfurt.
+# Deliberately NO databases section: the bot stores everything in local JSON
+# files (storage/json_store.py). There is no PostgreSQL, Supabase, SQLite or
+# any other data service in this architecture.

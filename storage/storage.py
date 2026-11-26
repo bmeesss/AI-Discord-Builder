@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from database.interfaces import (
+from storage.interfaces import (
     ActionRepository,
     AnalysisRepository,
     ConversationRepository,
@@ -16,7 +16,7 @@ from database.interfaces import (
 
 @dataclass
 class Storage:
-    """Wat applicatiecode te zien krijgt — nooit een concrete SDK."""
+    """Wat applicatiecode te zien krijgt — de JSON-file backend eronder."""
 
     backend: str
     actions: ActionRepository

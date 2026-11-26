@@ -27,7 +27,7 @@ from ai.client import AIPlanError
 from builder.history import add_action
 from services.ai_planning_service import AIPlanningService
 
-from database.conversations import save_conversation
+from storage import get_storage
 
 
 logger = logging.getLogger(
@@ -36,7 +36,7 @@ logger = logging.getLogger(
 
 
 # =====================================
-# DATABASE LOGGING
+# STORAGE LOGGING
 # =====================================
 
 
@@ -50,18 +50,29 @@ async def log_conversation(
     """
     Save conversation safely.
 
-    Database failures should never break
+    Storage failures should never break
     the Discord flow.
     """
 
     try:
 
-        await save_conversation(
-            guild_id=guild_id,
-            user_id=user_id,
+        try:
+
+            ai_plan = json.loads(response)
+
+        except (TypeError, ValueError):
+
+            ai_plan = {
+                "raw": response,
+            }
+
+
+        await get_storage().conversations.save_conversation(
+            guild_id=str(guild_id),
+            user_id=str(user_id),
             username=username,
-            message=message,
-            response=response,
+            request=message,
+            ai_plan=ai_plan,
         )
 
 

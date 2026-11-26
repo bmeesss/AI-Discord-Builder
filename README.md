@@ -6,24 +6,22 @@ maakt een JSON-plan; de bestaande validatie, bevestigingsknoppen,
 security-checks en executor bepalen daarna of Discord-wijzigingen mogen worden
 uitgevoerd.
 
+De bot is **volledig databasevrij en gratis te draaien**:
+
+- **geen** PostgreSQL, Supabase, SQLite of andere (betaalde) databasedienst;
+- **geen** databasecontainer, migraties of verbindingen bij het opstarten;
+- persistente gegevens (rollback-history, conversatie-log) staan in lokale
+  JSON-bestanden in `DATA_DIR` (standaard `data/`);
+- draait op **Render Free (€0/maand)** met **UptimeRobot Free** als monitor —
+  of gewoon lokaal/via Docker.
+
 Ondersteunde AI-providers:
 
 - Groq (cloud);
 - OpenAI (cloud);
 - Ollama (optionele lokale AI).
 
-Ondersteunde opslag-backends (conversations, memories, rollback-history):
-
-- PostgreSQL — **standaard voor self-hosting**, lokaal via Docker;
-- Supabase — optionele cloud-backend.
-
-Local AI is optioneel. Cloud-only installaties starten geen Ollama en downloaden
-geen lokale modellen.
-
-## Installatie met Docker
-
-De repository bevat een eenvoudige container-baseline. Python is dan niet nodig
-op de host.
+## Snel starten (Docker)
 
 ```bash
 git clone https://github.com/bmeesss/AI-Discord-Builder.git
@@ -31,7 +29,7 @@ cd AI-Discord-Builder
 cp .env.example .env
 ```
 
-Vul in `.env` minimaal in:
+Vul in `.env` **alleen** in:
 
 ```env
 DISCORD_TOKEN=...
@@ -46,86 +44,70 @@ docker compose up -d
 docker compose logs -f bot
 ```
 
-Dit start PostgreSQL (`db`) en de bot. De bot wacht tot PostgreSQL gezond is,
-draait daarna automatisch de datamigraties en start pas dan. Er is **geen
-Supabase-account of cloud-database nodig**. Data overleeft restarts via het
-named volume `postgres_data`.
-
-De standaard Compose-configuratie voegt geen Ollama toe. Wil je Supabase
-gebruiken in plaats van de lokale PostgreSQL, zet dan
-`DATABASE_BACKEND=supabase` met `SUPABASE_URL` en `SUPABASE_KEY` in `.env`.
-Zie [docs/self-hosting.md](docs/self-hosting.md) voor migraties, backups,
-upgrades en troubleshooting.
+Dat is alles: één container, geen database. De JSON-opslag staat op het named
+volume `bot_data` en overleeft container-restarts en image-rebuilds.
 
 Health endpoints:
 
 - `http://127.0.0.1:8080/healthz` — process liveness;
-- `http://127.0.0.1:8080/readyz` — readiness: Discord runtime **én** database
-  (bereikbaar + migraties uitgevoerd), anders HTTP 503. Dit endpoint toont
-  alleen statussen, nooit tokens, keys of andere interne details.
+- `http://127.0.0.1:8080/readyz` — readiness: Discord runtime **én** lokale
+  opslag, anders HTTP 503. Dit endpoint toont alleen statussen, nooit tokens,
+  keys of andere interne details.
 
-## Deployen op Render (gehost, self-hosted)
+## Deployen op Render Free (€0/maand)
 
-Wil je de bot 24/7 draaien zonder eigen server, deploy dan op Render. De
-repository bevat een kant-en-klare [`render.yaml`](render.yaml)-blueprint:
-één **betaalde Web Service** (altijd aan — een Discord Gateway-verbinding mag
-nooit stilvallen) plus een managed PostgreSQL-database.
-
-> Let op: een **Free** Render-web-service valt na 15 minuten zonder inkomend
-> verkeer stil en is ongeschikt voor een Discord-bot. Gebruik ook geen
-> externe "keep-alive"-pings om een gratis service wakker te houden — kies
-> gewoon een betaalde instantie. Een Background Worker kan niet: die heeft
-> geen publieke healthcheck-URL voor uptime-monitoring.
+De repository bevat een [`render.yaml`](render.yaml)-blueprint die precies
+één **Free** web service deployt — geen databases, geen betaalde resources.
 
 In het kort:
 
 1. Fork deze repository naar je eigen GitHub-account.
 2. Render Dashboard → **New → Blueprint** → selecteer de repository.
 3. Vul éénmalig de gevraagde geheimen in (`DISCORD_TOKEN`, `GROQ_API_KEY` of
-   `OPENAI_API_KEY`, `AI_PROVIDER`); `DATABASE_URL` wordt automatisch
-   gekoppeld.
-4. Controleer `https://<servicenaam>.onrender.com/readyz` (HTTP 200 = ready).
-5. Zet [UptimeRobot](https://uptimerobot.com) op `/readyz` zodat je een
-   melding krijgt als de bot of database niet operationeel is.
+   `OPENAI_API_KEY`, `AI_PROVIDER`).
+4. Zet [UptimeRobot Free](https://uptimerobot.com) op
+   `https://<servicenaam>.onrender.com/readyz` (HTTP-check, elke 5 minuten).
 
-De volledige beginner-vriendelijke gids — inclusief waarom deze architectuur,
-UptimeRobot-instellen, updaten, backups en troubleshooting — staat in
-**[docs/render.md](docs/render.md)**.
+> **Belangrijk — hoe Render Free écht werkt.** Een Free web service valt na
+> 15 minuten zonder **inkomend** verkeer automatisch in slaap. De
+> Discord-Gateway-verbinding is een *uitgaande* verbinding en houdt de service
+> dus **niet** actief. In de praktijk houdt de UptimeRobot-check (elke 5
+> minuten een HTTP-request) de service wakker; valt die monitoring langer dan
+> 15 minuten uit, dan slaapt de service in en is de bot offline tot de
+> volgende check hem weer wekt (~1 minuut opstarttijd). Ook zijn bestanden op
+> Render Free **tijdelijk**: JSON-geschiedenis gaat verloren bij elke herstart,
+> redeploy of slaapstand. Lees [docs/render.md](docs/render.md) voor de
+> volledige uitleg, beperkingen en alternatieven.
 
-## Database en self-hosting
+De volledige beginner-vriendelijke gids staat in **[docs/render.md](docs/render.md)**.
+
+## Opslag zonder database (JSON)
 
 De applicatiecode praat uitsluitend met provider-neutrale storage-interfaces
-(`database/interfaces.py`); de storage factory kiest de backend via
-`DATABASE_BACKEND`:
+(`storage/interfaces.py`); de backend is een lokale JSON-file store
+(`storage/json_store.py`). Geen SQL, geen verbindingen, geen migraties.
 
-- `postgres` (default): async PostgreSQL (asyncpg) met connection pooling en
-  versie-gestuurde migraties in `database/postgres/migrations/`;
-- `supabase`: de bestaande Supabase-adapter, ongewijzigd beschikbaar.
+| Bestand in `DATA_DIR` | Inhoud | Bewaard |
+| --- | --- | --- |
+| `actions.json` | rollback-history per server | laatste 200 acties per server |
+| `conversations.json` | conversatie-log (voor AI-context) | laatste 50 per server |
+| `memories.json` | voorkeuren (geheugen) | laatste 50 per server |
+| `analysis.json` | server-analyse-snapshots | laatste 10 per server |
+| `templates.json` | **optioneel**, zelf aangemaakt (zie hieronder) | door jou |
 
-Bestaande installaties die alleen `SUPABASE_URL`/`SUPABASE_KEY` hebben,
-blijven automatisch Supabase gebruiken tot `DATABASE_BACKEND` expliciet wordt
-gezet.
+- Schrijven gaat atomisch (tijdelijk bestand + rename); een crash kan nooit
+  een half bestand achterlaten.
+- Een corrupt bestand is nooit fataal: het wordt apart gezet als
+  `<naam>.corrupt` en de bot start ermee door (met waarschuwing in de log).
+- Data blijft gescheiden per Discord-server (guild isolation).
+- Wil je templates gebruiken, maak dan `data/templates.json` aan met een
+  lijst als:
+  `[{"name": "SMP Starter", "description": "...", "category": "gaming", "tags": ["minecraft"]}]`.
 
-Migrations handmatig beheren:
-
-```bash
-# Docker
-docker compose exec bot python -m database migrate
-docker compose exec bot python -m database status
-
-# Host
-python -m database migrate
-python -m database status
-```
-
-De bot controleert bij startup of de database bereikbaar is en het schema
-up-to-date is; bij een fout stopt de startup direct met een duidelijke
-melding in plaats van later willekeurig te crashen.
-
-De opslaglaag slaat alleen state/history op en bepaalt **nooit** of een
-Discord-actie is toegestaan — autorisatie blijft bij de
-permission/executor-laag. Repository-methodes filteren server-side op
-`guild_id`.
+Op een permanente host (eigen server, VPS, Docker-volume) blijven de
+bestanden bewaard. Op **Render Free** niet: daar is het bestandssysteem
+tijdelijk (zie boven). Zie [docs/self-hosting.md](docs/self-hosting.md) voor
+backup-tips.
 
 ## Cloud AI configureren
 
@@ -155,8 +137,6 @@ krijgt geen directe toegang tot Discord API-acties. De bestaande
 `ai.validation`, confirmation flow, permissions, executor en rollback blijven
 actief.
 
-Voorbeeld voor een host-installatie:
-
 ```env
 AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
@@ -166,72 +146,14 @@ LOCAL_AI_AUTO_SETUP=false
 LOCAL_AI_AUTO_SELECT_MODEL=true
 ```
 
-Inspecteer eerst zonder wijzigingen:
+Inspecteer eerst zonder wijzigingen: `python -m setup detect`, daarna
+`python -m setup setup` voor de interactieve installatie. Zie
+[docs/local-ai.md](docs/local-ai.md) voor Docker, modelkeuze en
+troubleshooting. Met Docker Compose gebruik je de overlay:
 
 ```bash
-python -m setup detect
+docker compose -f compose.yaml -f compose.local-ai.yaml up -d
 ```
-
-Start daarna de interactieve setup:
-
-```bash
-python -m setup setup
-```
-
-De setup kan, na expliciete toestemming:
-
-- OS en architectuur detecteren;
-- CPU, RAM en vrije diskruimte rapporteren;
-- Docker en een GPU-tool detecteren wanneer betrouwbaar beschikbaar;
-- Ollama detecteren;
-- Ollama starten wanneer het al geïnstalleerd is;
-- Ollama op Linux, Windows of macOS installeren wanneer een ondersteunde
-  installer beschikbaar is;
-- een gekozen model downloaden;
-- een model-smoketest uitvoeren;
-- alleen local-AI-instellingen naar `.env` schrijven.
-
-De setup-tool installeert of downloadt niets in `detect`-modus. De bot zelf
-installeert nooit software bij startup.
-
-Zie [docs/local-ai.md](docs/local-ai.md) voor Docker, modelkeuze en
-troubleshooting.
-
-## Local AI in Docker
-
-Gebruik de extra Compose-overlay expliciet:
-
-```bash
-docker compose \
-  -f compose.yaml \
-  -f compose.local-ai.yaml \
-  up -d
-```
-
-Dit voegt de Ollama-container alleen in deze modus toe. Modellen worden niet in
-de bot-image geplaatst maar in het named volume `ollama_models` opgeslagen. De
-one-shot `ollama-model` service voert bij de eerste start `ollama pull` uit.
-Handmatig pullen kan ook:
-
-```bash
-docker compose \
-  -f compose.yaml \
-  -f compose.local-ai.yaml \
-  exec ollama ollama pull qwen3:4b
-```
-
-Test de lokale provider met:
-
-```bash
-docker compose \
-  -f compose.yaml \
-  -f compose.local-ai.yaml \
-  exec bot python -m setup test
-```
-
-De bot gebruikt intern `http://ollama:11434`; een host-gebaseerde setup-tool
-gebruikt `http://localhost:11434`. Het model blijft behouden bij een container
-recreate zolang `ollama_models` niet wordt verwijderd.
 
 ## Discord bot configureren
 
@@ -268,8 +190,8 @@ Beschikbare commando's:
 
 - `/ask` — maak of wijzig een serverplan;
 - mention de bot — dezelfde planning-flow;
-- `/rollback amount:<n>` — draai recente opgeslagen actions terug wanneer de
-  persistence-adapter beschikbaar is.
+- `/rollback amount:<n>` — draai recente opgeslagen actions terug (zolang de
+  JSON-history bewaard is gebleven).
 
 ## Lokale development en tests
 
@@ -283,18 +205,12 @@ python -m unittest discover -v
 pytest -q
 ```
 
-De normale tests gebruiken mocks en hebben geen Ollama-server of database
-nodig. De echte integration tests zijn opt-in:
+De tests gebruiken mocks en tijdelijke mappen; er is **geen database nodig**.
+De enige opt-in integratietest is die tegen een echte Ollama-server:
 
 ```bash
-# Ollama
 RUN_OLLAMA_TESTS=1 python -m unittest \
   tests.integration.test_ollama_integration
-
-# PostgreSQL (bijv. tegen de Compose-database)
-RUN_POSTGRES_TESTS=1 \
-DATABASE_URL=postgresql://discord_builder:discord_builder@localhost:5432/discord_builder \
-  python -m unittest tests.integration.test_postgres_integration
 ```
 
 ## Beveiligingsgrenzen
@@ -306,20 +222,23 @@ DATABASE_URL=postgresql://discord_builder:discord_builder@localhost:5432/discord
 - Commit nooit `.env`, API keys of Ollama-modelbestanden.
 - Behandel lokaal opgeslagen prompts, memory en action history als gevoelige
   data.
+- De health-endpoints tonen nooit tokens, keys of interne details.
 
 ## Huidige grenzen
 
-- Ollama-installatie is best-effort en OS-afhankelijk; controleer altijd de
-  voorgestelde actie.
-- Hardwaredetectie kan geen prestaties garanderen.
-- Modelkwaliteit en JSON-betrouwbaarheid kunnen per lokaal model verschillen.
-- Rollback-history heeft geen eigen statuskolom: alleen succesvol uitgevoerde
-  acties worden opgeslagen, en `rollback` kijkt naar de laatste N acties
-  (oudste eerst). Deze bestaande semantiek is bewust behouden.
+- **JSON-opslag is lokaal**: op Render Free (of elke host met een tijdelijk
+  bestandssysteem) gaan rollback-history en conversatie-logs verloren bij
+  herstart, redeploy of slaapstand. Op een eigen server/Docker-volume blijven
+  ze bewaard.
+- Rollback werkt alleen over bewaarde history; zonder history zegt
+  `/rollback` "No history found".
 - Rollback van `delete_channel`/`delete_role` is een *gedeeltelijk* herstel:
   het kanaal/de rol wordt opnieuw aangemaakt met de opgeslagen naam,
   categorie, kleur en permissies — berichten, overwrites en rol-posities
   worden niet hersteld.
-- De opslaglaag kent geen per-guild settings-tabel; guild-specifieke bot-
-  instellingen leven nu in environment/config (gedocumenteerd, geen redesign).
+- Conversatie-samenvattingen in de AI-context zijn lichtgewicht (laatste
+  verzoeken); er draait geen aparte summarizer.
+- Ollama-installatie is best-effort en OS-afhankelijk; controleer altijd de
+  voorgestelde actie.
+- Modelkwaliteit en JSON-betrouwbaarheid kunnen per lokaal model verschillen.
 - Een publiek webdashboard is nog niet geïmplementeerd.

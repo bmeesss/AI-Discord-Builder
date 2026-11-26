@@ -14,8 +14,8 @@ import discord
 import config
 from ai.client import AIClient, AIPlanError
 from builder.context import build_server_context, render_server_context
-from database import get_storage
-from database.interfaces import AnalysisRepository
+from storage import get_storage
+from storage.interfaces import AnalysisRepository
 
 logger = logging.getLogger("ai_discord_builder.ai_planning_service")
 

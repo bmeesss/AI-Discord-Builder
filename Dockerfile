@@ -12,8 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Keep runtime files writable without running the bot as root.
+# /app/data holds the local JSON storage (rollback history, conversations).
 RUN useradd --create-home --uid 10001 appuser \
-    && mkdir -p /app/logs \
+    && mkdir -p /app/logs /app/data \
     && chown -R appuser:appuser /app
 USER appuser
 

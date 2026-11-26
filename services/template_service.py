@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 
 from ai.models import TemplateCandidate
-from database import get_storage
-from database.interfaces import TemplateRepository
+from storage import get_storage
+from storage.interfaces import TemplateRepository
 
 logger = logging.getLogger("ai_discord_builder.template_service")
 
