@@ -296,7 +296,8 @@ async def build_plan(
 
     logger.info(
         "Building plan for %s",
-        prompt,
+        # Prompts can contain sensitive user content: log a short excerpt only.
+        prompt if len(prompt) <= 200 else prompt[:200] + "…",
     )
 
 

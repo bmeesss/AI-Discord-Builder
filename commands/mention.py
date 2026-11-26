@@ -204,15 +204,18 @@ class MentionCog(
 
 
 
-            except Exception as e:
+            except Exception:
 
                 logger.exception(
                     "Mention plan failed"
                 )
 
 
+                # Never echo raw exception text to Discord: it can contain
+                # internal details (hosts, DSNs, SDK errors). Details are logged.
                 await message.reply(
-                    f"❌ Error creating plan: {e}",
+                    "❌ Unexpected error while creating the plan. "
+                    "Check the bot logs for details.",
                     mention_author=False,
                 )
 

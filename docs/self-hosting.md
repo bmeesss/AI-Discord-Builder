@@ -12,6 +12,9 @@ geen Supabase-account nodig. Supabase blijft als optionele backend bestaan.
 - Alleen voor cloud AI: een API-key van Groq of OpenAI.
 - Alleen voor local AI: voldoende hardware voor het gekozen Ollama-model.
 
+Liever gehost zonder eigen server? Zie **[render.md](render.md)** voor het
+deployen op Render (met UptimeRobot-monitoring).
+
 ## Installatie (Docker)
 
 ```bash
@@ -92,7 +95,8 @@ werkende standaarden.
 | `CONFIRMATION_TIMEOUT` | `120` | nee | levensduur bevestigingsknoppen (seconden) |
 | `APP_ENV` | `production` | nee | deployment-context |
 | `WEB_HOST` | `0.0.0.0` | nee | bind-adres health-endpoints |
-| `WEB_PORT` | `8080` | nee | poort health-endpoints |
+| `WEB_PORT` | `8080` | nee | poort health-endpoints (heeft voorrang op `PORT`) |
+| `PORT` | `10000` (Render) | nee | platform-poort; automatisch gebruikt wanneer `WEB_PORT` niet is gezet (Render zet dit zelf) |
 | `LOG_LEVEL` | `INFO` | nee | logniveau |
 | `LOG_FILE_PATH` | `logs/actions.log` | nee | logbestand |
 
@@ -230,7 +234,7 @@ docker compose logs -f bot
 | `Missing required environment variables: DATABASE_URL` | Backend is (default) `postgres` zonder DSN. Zet `DATABASE_URL` of kies `DATABASE_BACKEND=supabase` met Supabase-keys. |
 | `Database schema is not up to date (pending: ...)` | Handmatige migraties vereist: `docker compose exec bot python -m database migrate`. |
 | `checksum ... already applied` | Een al-toegepaste migratie is lokaal gewijzigd. Wijzig nooit toegepaste migraties; voeg een nieuwe toe. Herstel desnoods de originele file uit git. |
-| `/readyz` geeft 503 met `components.database.ok=false` | Database onbereikbaar; bot blijft draaien maar is niet ready. Los de db-connectie op. |
+| `/readyz` geeft 503 met `components.database: unhealthy` | Database onbereikbaar; bot blijft draaien maar is niet ready. Los de db-connectie op. |
 | Bot start niet, `Failed to load Discord extensions` | Controleer `docker compose logs bot` voor de echte fout. |
 | Rollback zegt “No history found” | Er is geen opgeslagen history (nieuwe db) of de database was onbereikbaar tijdens het opslaan. |
 | Data “weg” na recreate | Alleen als het volume is verwijderd. `docker compose down -v` verwijdert volumes; gebruik `down` zonder `-v`. |
@@ -239,10 +243,14 @@ docker compose logs -f bot
 
 - `GET /healthz` — process draait (altijd 200 zolang het proces leeft);
 - `GET /readyz` — 200 wanneer Discord én alle vereiste componenten (database,
-  migraties) ready zijn, anders 503 met een componenten-overzicht.
+  migraties) ready zijn, anders 503. De response toont alleen statussen per
+  component (`ok`/`unhealthy`) — nooit tokens, DSN's of andere interne
+  details (die staan in de logs).
 
 In Docker zijn deze alleen op de host bereikbaar via
-`http://127.0.0.1:8080/...` (loopback binding).
+`http://127.0.0.1:${WEB_PORT:-8080}/...` (loopback binding). Op een host met
+publieke URL (bijv. Render) monitor je `/readyz` met
+[UptimeRobot](https://uptimerobot.com) — zie [render.md](render.md).
 
 ## Restart-gedrag
 

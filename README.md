@@ -61,7 +61,36 @@ Health endpoints:
 
 - `http://127.0.0.1:8080/healthz` — process liveness;
 - `http://127.0.0.1:8080/readyz` — readiness: Discord runtime **én** database
-  (bereikbaar + migraties uitgevoerd), anders HTTP 503.
+  (bereikbaar + migraties uitgevoerd), anders HTTP 503. Dit endpoint toont
+  alleen statussen, nooit tokens, keys of andere interne details.
+
+## Deployen op Render (gehost, self-hosted)
+
+Wil je de bot 24/7 draaien zonder eigen server, deploy dan op Render. De
+repository bevat een kant-en-klare [`render.yaml`](render.yaml)-blueprint:
+één **betaalde Web Service** (altijd aan — een Discord Gateway-verbinding mag
+nooit stilvallen) plus een managed PostgreSQL-database.
+
+> Let op: een **Free** Render-web-service valt na 15 minuten zonder inkomend
+> verkeer stil en is ongeschikt voor een Discord-bot. Gebruik ook geen
+> externe "keep-alive"-pings om een gratis service wakker te houden — kies
+> gewoon een betaalde instantie. Een Background Worker kan niet: die heeft
+> geen publieke healthcheck-URL voor uptime-monitoring.
+
+In het kort:
+
+1. Fork deze repository naar je eigen GitHub-account.
+2. Render Dashboard → **New → Blueprint** → selecteer de repository.
+3. Vul éénmalig de gevraagde geheimen in (`DISCORD_TOKEN`, `GROQ_API_KEY` of
+   `OPENAI_API_KEY`, `AI_PROVIDER`); `DATABASE_URL` wordt automatisch
+   gekoppeld.
+4. Controleer `https://<servicenaam>.onrender.com/readyz` (HTTP 200 = ready).
+5. Zet [UptimeRobot](https://uptimerobot.com) op `/readyz` zodat je een
+   melding krijgt als de bot of database niet operationeel is.
+
+De volledige beginner-vriendelijke gids — inclusief waarom deze architectuur,
+UptimeRobot-instellen, updaten, backups en troubleshooting — staat in
+**[docs/render.md](docs/render.md)**.
 
 ## Database en self-hosting
 
@@ -287,6 +316,10 @@ DATABASE_URL=postgresql://discord_builder:discord_builder@localhost:5432/discord
 - Rollback-history heeft geen eigen statuskolom: alleen succesvol uitgevoerde
   acties worden opgeslagen, en `rollback` kijkt naar de laatste N acties
   (oudste eerst). Deze bestaande semantiek is bewust behouden.
+- Rollback van `delete_channel`/`delete_role` is een *gedeeltelijk* herstel:
+  het kanaal/de rol wordt opnieuw aangemaakt met de opgeslagen naam,
+  categorie, kleur en permissies — berichten, overwrites en rol-posities
+  worden niet hersteld.
 - De opslaglaag kent geen per-guild settings-tabel; guild-specifieke bot-
   instellingen leven nu in environment/config (gedocumenteerd, geen redesign).
 - Een publiek webdashboard is nog niet geïmplementeerd.

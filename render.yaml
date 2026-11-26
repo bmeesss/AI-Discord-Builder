@@ -1,0 +1,63 @@
+# Render Blueprint for AI-Discord-Builder (self-hosted).
+#
+# Architecture choice (see docs/render.md for the full rationale):
+# * The bot keeps a persistent Discord Gateway connection, so it needs an
+#   always-on instance. This is a paid Web Service (`plan: 0.5c-512mb`), NOT a
+#   Free instance (Free web services spin down after 15 minutes without
+#   inbound traffic and are not suitable for production) and NOT a Background
+#   Worker (workers have no public URL and no health checks, so UptimeRobot
+#   cannot monitor them).
+# * The Web Service exposes a public healthcheck URL:
+#   - /healthz — process liveness (Render `healthCheckPath`, also used for
+#     zero-downtime deploy gating);
+#   - /readyz  — true readiness (Discord runtime + database). Monitor this
+#     one with UptimeRobot; it returns HTTP 503 when the bot or the database
+#     is not operational.
+# * PostgreSQL runs as a managed Render database in the same region; the
+#   connection string is injected automatically. Migrations run automatically
+#   at startup (DB_MIGRATE_ON_STARTUP=true).
+#
+# Deployment steps: see docs/render.md. In short: push this repo to GitHub,
+# then Render Dashboard -> New -> Blueprint -> select the repo. Render asks
+# for the secret values below (DISCORD_TOKEN, GROQ_API_KEY, ...) once.
+#
+# Never put real tokens or API keys in this file.
+
+services:
+  - type: web
+    name: ai-discord-builder
+    runtime: docker            # builds from the Dockerfile in this repository
+    plan: 0.5c-512mb           # smallest always-on (paid) compute plan
+    numInstances: 1            # exactly ONE instance: a bot must not run twice
+    healthCheckPath: /healthz  # liveness; monitor /readyz with UptimeRobot
+    autoDeployTrigger: checksPass  # deploy only when the GitHub CI checks pass
+    envVars:
+      # --- Secrets: Render prompts for these once and never stores them here.
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # --- Provider selection: enter "groq" (recommended) or "openai".
+      # ("ollama" needs a reachable Ollama server and is not practical on Render.)
+      - key: AI_PROVIDER
+        sync: false
+      # --- Database: wired automatically from the managed Postgres instance.
+      - key: DATABASE_BACKEND
+        value: postgres
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-discord-builder-db
+          property: connectionString
+
+databases:
+  - name: ai-discord-builder-db
+    # Smallest paid compute plan: no expiry and no idle spin-down.
+    # For quick experiments you can use `plan: free`, but free Render Postgres
+    # databases expire 30 days after creation — never use free for production.
+    plan: 0.1c-256mb
+    databaseName: discord_builder
+    user: discord_builder
+    # Same region as the service (both default to oregon). Change both together
+    # if you want e.g. frankfurt.

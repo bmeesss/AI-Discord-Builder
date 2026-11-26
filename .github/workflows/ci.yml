@@ -46,6 +46,21 @@ jobs:
           docker compose config --quiet
           docker compose -f compose.yaml -f compose.local-ai.yaml config --quiet
 
+  # Validate render.yaml against the official Render Blueprint JSON schema.
+  render-blueprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate render.yaml against Render's JSON schema
+        run: |
+          pip install check-jsonschema
+          check-jsonschema --schemafile https://render.com/schema/render.yaml.json render.yaml
+
   # Integration tests against a real PostgreSQL service container.
   postgres-integration:
     runs-on: ubuntu-latest

@@ -14,14 +14,18 @@ def can_use_builder(member: discord.Member) -> bool:
     """
     Bepaalt of een lid het recht heeft om /ask te gebruiken voor server-wijzigingen.
     Standaard: alleen Administrators.
+
+    Fail-closed: een object zonder guild-rechten (bijv. een losse User door een
+    cache-miss) krijgt nooit toegang.
     """
     if not config.REQUIRE_ADMIN:
         return True
 
-    if member.guild_permissions.administrator:
-        return True
+    permissions = getattr(member, "guild_permissions", None)
+    if permissions is None:
+        return False
 
-    return False
+    return bool(permissions.administrator)
 
 
 def missing_permission_message() -> str:

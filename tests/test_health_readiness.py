@@ -36,7 +36,7 @@ class ReadinessTests(unittest.TestCase):
         payload, status = web_app.evaluate_readiness()
         self.assertEqual(status, 503)
         self.assertEqual(payload["status"], "not ready")
-        self.assertFalse(payload["components"]["database"]["ok"])
+        self.assertEqual(payload["components"]["database"], "unhealthy")
 
     def test_component_detail_is_truncated(self):
         web_app.set_component("database", False, "x" * 1000)
@@ -44,6 +44,24 @@ class ReadinessTests(unittest.TestCase):
             len(web_app.get_components()["database"]["detail"]),
             200,
         )
+
+    def test_readiness_payload_never_contains_component_details(self):
+        """/readyz is public on hosted deployments: details stay internal."""
+
+        web_app.set_ready(True)
+        web_app.set_component(
+            "database",
+            False,
+            "postgresql://user:secret@db-host:5432/prod password auth failed",
+        )
+
+        payload, status = web_app.evaluate_readiness()
+        self.assertEqual(status, 503)
+        serialized = str(payload)
+        self.assertNotIn("secret", serialized)
+        self.assertNotIn("db-host", serialized)
+        self.assertNotIn("postgresql://", serialized)
+        self.assertEqual(payload["components"]["database"], "unhealthy")
 
 
 class HttpEndpointTests(unittest.TestCase):

@@ -34,7 +34,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+      # Host port : container port both follow WEB_PORT (the bot binds there).
+      - "127.0.0.1:${WEB_PORT:-8080}:${WEB_PORT:-8080}"
 
 volumes:
   postgres_data:

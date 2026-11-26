@@ -91,7 +91,10 @@ CONFIRMATION_TIMEOUT = _env_int("CONFIRMATION_TIMEOUT", 120, minimum=1)
 # --- Local setup/deployment ---
 APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
 WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
-WEB_PORT = _env_int("WEB_PORT", 8080, minimum=1)
+# WEB_PORT wins when set.  Otherwise the platform port is used: Render sets
+# PORT (default 10000) for every web service and routes public traffic to it,
+# so the health endpoints must bind there.  Local runs default to 8080.
+WEB_PORT = _env_int("WEB_PORT", _env_int("PORT", 8080, minimum=1), minimum=1)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 
 # --- Database / persistence ---

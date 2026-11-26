@@ -35,7 +35,7 @@ _PATTERNS = (
 # Read by code but documented as commented-out optional lines in .env.example.
 # (empty means: everything must be documented as an active line or via the
 # commented-opt-in mechanism below)
-_COMMENTED_OPT_INS = {"OPENAI_BASE_URL", "SUPABASE_URL", "SUPABASE_KEY"}
+_COMMENTED_OPT_INS = {"OPENAI_BASE_URL", "SUPABASE_URL", "SUPABASE_KEY", "PORT"}
 
 # Documented in .env.example but only consumed by Compose interpolation.
 _COMPOSE_ONLY = {"OLLAMA_HOST_PORT"}
