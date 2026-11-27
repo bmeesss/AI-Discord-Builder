@@ -1,193 +1,154 @@
-"""Startup failure behavior tests (FASE 8).
+"""Startup failure behavior tests — database-free edition.
 
 The bot must fail clearly, never become half-ready, and never leak
-credentials into errors or logs.
+credentials into errors or logs.  Local JSON storage problems must surface
+at startup with actionable messages and must never crash on corrupt files.
 """
 
 from __future__ import annotations
 
+import asyncio
+import tempfile
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 
-import database
-from database.errors import (
-    MigrationError,
-    StorageNotConfiguredError,
-    StorageUnavailableError,
-)
-from database.factory import create_storage
-from database.postgres.backend import PostgresBackend
+import config
+from storage import close_storage, create_json_storage, initialize_storage
+from storage.errors import StorageUnavailableError
 
 
-def make_postgres_backend(**overrides) -> PostgresBackend:
-    kwargs = {
-        "dsn": "postgresql://builder:s3cretpw@127.0.0.1:59999/builder",
-        "min_size": 1,
-        "max_size": 2,
-        "migrate_on_startup": True,
-    }
-    kwargs.update(overrides)
-    return PostgresBackend(**kwargs)
+class ConfigFailureTests(unittest.TestCase):
+    def test_missing_discord_token_fails_clearly(self):
+        environ = {"AI_PROVIDER": "groq", "GROQ_API_KEY": "key"}
+        with self.assertRaises(RuntimeError) as ctx:
+            config.validate_config(environ=environ)
+        self.assertIn("DISCORD_TOKEN", str(ctx.exception))
+
+    def test_unknown_provider_fails_clearly(self):
+        environ = {
+            "DISCORD_TOKEN": "t",
+            "AI_PROVIDER": "hal9000",
+        }
+        with self.assertRaises(RuntimeError) as ctx:
+            config.validate_config(environ=environ)
+        self.assertIn("AI_PROVIDER", str(ctx.exception))
+
+    def test_missing_provider_key_fails_clearly(self):
+        environ = {"DISCORD_TOKEN": "t", "AI_PROVIDER": "groq"}
+        with self.assertRaises(RuntimeError) as ctx:
+            config.validate_config(environ=environ)
+        self.assertIn("GROQ_API_KEY", str(ctx.exception))
+
+    def test_valid_minimal_config_needs_no_database_settings(self):
+        """The hard requirement: zero database configuration."""
+
+        config.validate_config(
+            environ={
+                "DISCORD_TOKEN": "t",
+                "AI_PROVIDER": "groq",
+                "GROQ_API_KEY": "key",
+            }
+        )
+        for banned in (
+            "DATABASE_URL",
+            "DATABASE_BACKEND",
+            "SUPABASE_URL",
+            "SUPABASE_KEY",
+            "POSTGRES_USER",
+        ):
+            self.assertNotIn(banned, config.__dict__)
 
 
-class UnreachableDatabaseTests(unittest.IsolatedAsyncioTestCase):
-    async def test_unreachable_database_fails_clearly_before_discord(self):
-        """Port 59999 is closed: initialize must fail fast with a clear error."""
+class StorageStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unusable_data_dir_fails_before_discord(self):
+        """A read-only data dir must stop startup with a clear error."""
 
-        backend = make_postgres_backend()
+        with tempfile.TemporaryDirectory() as tmp:
+            blocked = Path(tmp) / "blocked"
+            blocked.mkdir()
+            blocked.chmod(0o500)  # read-only directory
 
-        with self.assertRaises(StorageUnavailableError) as ctx:
-            await backend.initialize()
+            try:
+                storage = create_json_storage(blocked)
+                with self.assertRaises(StorageUnavailableError) as ctx:
+                    await storage.initialize()
+                self.assertIn("not usable", str(ctx.exception))
+            finally:
+                blocked.chmod(0o700)  # allow cleanup
 
-        message = str(ctx.exception)
-        self.assertIn("Could not connect to PostgreSQL", message)
+    async def test_initialize_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            for _ in range(2):
+                storage = create_json_storage(data_dir)
+                await storage.initialize()
+                ok, detail = await storage.healthcheck()
+                self.assertTrue(ok, detail)
 
-    async def test_failure_message_never_contains_password(self):
-        backend = make_postgres_backend()
+    async def test_corrupt_json_files_do_not_crash_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            data_dir.mkdir()
+            (data_dir / "actions.json").write_text("{not json", encoding="utf-8")
+            (data_dir / "conversations.json").write_text("[1,2", encoding="utf-8")
 
-        with self.assertRaises(StorageUnavailableError) as ctx:
-            await backend.initialize()
+            storage = create_json_storage(data_dir)
+            await storage.initialize()  # must not raise
 
-        self.assertNotIn("s3cretpw", str(ctx.exception))
-        self.assertIn("***", str(ctx.exception))
-
-    async def test_healthcheck_masks_failures_instead_of_raising(self):
-        backend = make_postgres_backend()
-        ok, detail = await backend.healthcheck()
-        self.assertFalse(ok)
-        self.assertNotIn("s3cretpw", detail)
-
-
-class MisconfigurationTests(unittest.TestCase):
-    def test_wrong_dsn_scheme_fails_at_storage_creation(self):
-        with self.assertRaises(StorageNotConfiguredError):
-            PostgresBackend(dsn="mysql://builder:pw@127.0.0.1:3306/builder")
-
-    def test_missing_dsn_fails_at_storage_creation(self):
-        with self.assertRaises(StorageNotConfiguredError):
-            create_storage(
-                {"DATABASE_BACKEND": "postgres", "DATABASE_URL": ""}
+            # Corrupt files are quarantined for manual recovery.
+            self.assertTrue((data_dir / "actions.json.corrupt").exists())
+            self.assertTrue(
+                (data_dir / "conversations.json.corrupt").exists()
             )
 
-    def test_invalid_pool_size_fails(self):
-        for bad in ("0", "-3", "not-a-number"):
-            with self.assertRaises(StorageNotConfiguredError):
-                create_storage(
-                    {
-                        "DATABASE_BACKEND": "postgres",
-                        "DATABASE_URL": "postgresql://u:p@127.0.0.1/db",
-                        "DB_POOL_MAX_SIZE": bad,
-                    }
-                )
+    async def test_healthcheck_never_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            storage = create_json_storage(data_dir)
+            await storage.initialize()
 
-    def test_invalid_backend_fails(self):
-        with self.assertRaises(StorageNotConfiguredError):
-            create_storage({"DATABASE_BACKEND": "sqlite"})
+            # Remove the data dir behind the store's back: healthcheck must
+            # report failure instead of raising.
+            for child in data_dir.iterdir():
+                child.unlink()
+            data_dir.rmdir()
+            ok, detail = await storage.healthcheck()
+            self.assertFalse(ok)
+            self.assertIn("missing", detail)
 
+    async def test_initialize_storage_without_any_env(self):
+        """initialize_storage works with no database configuration at all."""
 
-class MigrationFailureStartupTests(unittest.IsolatedAsyncioTestCase):
-    async def test_pending_migrations_block_startup_when_automigrate_off(self):
-        """DB_MIGRATE_ON_STARTUP=false + pending migrations = clear startup error."""
-
-        backend = make_postgres_backend(migrate_on_startup=False)
-
-        class FakePool:
-            async def open(self):
-                return None
-
-            async def pool(self):
-                return self
-
-            def acquire(self):
-                return self
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return False
-
-            async def ping(self):
-                return None
-
-            async def close(self):
-                return None
-
-            async def execute(self, sql, *params):
-                return "OK"
-
-            async def fetch(self, sql, *params):
-                return []  # nothing applied yet
-
-        backend._pool = FakePool()
-        # The migrator keeps its own pool reference; swap both.
-        backend._migrator._pool = backend._pool
-
-        with self.assertRaises(MigrationError) as ctx:
-            await backend.initialize()
-
-        self.assertIn("pending", str(ctx.exception).lower())
-        self.assertIn("database migrate", str(ctx.exception).lower())
-
-
-class MainStartupTests(unittest.IsolatedAsyncioTestCase):
-    async def test_storage_error_exits_startup_cleanly(self):
-        """main() must convert StorageError into a clear SystemExit."""
-
-        import main as main_module
-
-        with (
-            patch.object(main_module.config, "validate_config"),
-            patch(
-                "database.initialize_storage",
-                new=AsyncMock(
-                    side_effect=StorageUnavailableError("db down"),
-                ),
-            ),self.assertRaises(SystemExit) as ctx
-        ):
-            await main_module.main()
-
-        self.assertIn("Database initialization failed", str(ctx.exception))
-
-    async def test_full_startup_registers_database_component(self):
-        """On success the database component + monitor are wired up."""
-
-        import main as main_module
-        import web.app as web_app
-
-        storage = MagicMock()
-        storage.healthcheck = AsyncMock(return_value=(True, "postgres ok"))
-        storage.close = AsyncMock()
-        storage.initialize = AsyncMock()
-
-        web_app.set_ready(False)
-        web_app.clear_components()
-
+        await close_storage()
         try:
-            database.set_storage(storage)
-            with (
-                patch.object(main_module.config, "validate_config"),
-                patch(
-                    "database.initialize_storage",
-                    new=AsyncMock(return_value=storage),
-                ),
-                patch.object(main_module, "start_web_thread"),
-                patch.object(
-                    main_module,
-                    "run_bot",
-                    new=AsyncMock(side_effect=RuntimeError("discord unreachable")),
-                ),
-                self.assertRaises(RuntimeError),
-            ):
-                await main_module.main()
-        finally:
-            components = web_app.get_components()
-            web_app.clear_components()
-            database.set_storage(None)
+            from storage import get_storage
 
-        self.assertIn("database", components)
-        self.assertTrue(components["database"]["ok"])
-        storage.close.assert_awaited_once()
+            storage = get_storage()
+            self.assertEqual(storage.backend, "json")
+        finally:
+            await close_storage()
+
+
+class NeverHalfReadyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_initialization_leaves_no_ready_state(self):
+        """A storage failure must not leave a half-initialized singleton."""
+
+        await close_storage()
+        with tempfile.TemporaryDirectory() as tmp:
+            blocked = Path(tmp) / "blocked"
+            blocked.mkdir()
+            blocked.chmod(0o500)
+            try:
+                from storage import set_storage
+
+                set_storage(create_json_storage(blocked))
+                with self.assertRaises(StorageUnavailableError):
+                    await initialize_storage()
+            finally:
+                blocked.chmod(0o700)
+                await close_storage()
+        # asyncio task cleanup for IsolatedAsyncioTestCase
+        await asyncio.sleep(0)
 
 
 if __name__ == "__main__":

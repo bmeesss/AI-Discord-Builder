@@ -5,10 +5,12 @@ server state, while the AI provider only returns validated plan text.  The
 optional local-AI setup is a separate CLI (``python -m setup``); bot startup
 never installs software or downloads models.
 
-Startup order is strict: configuration is validated and the database backend
-(including migrations) is initialized *before* the Discord connection opens.
-A broken database therefore stops startup immediately with a clear error
-instead of crashing mid-session.
+The bot is fully self-contained and database-free: persistence (rollback
+history, conversation log) is stored in local JSON files via ``storage``.
+Startup order is strict: configuration is validated and the local storage
+directory is created/verified *before* the Discord connection opens.  An
+unusable data directory therefore stops startup immediately with a clear
+error instead of crashing mid-session.
 """
 
 from __future__ import annotations
@@ -24,14 +26,14 @@ import discord
 from discord.ext import commands
 
 import config
-import database
-from database.errors import StorageError
+from storage import Storage, close_storage, initialize_storage
+from storage.errors import StorageError
 from web.app import app, set_component, set_ready
 
 logger = logging.getLogger("ai_discord_builder")
 main_logger = logging.getLogger("ai_discord_builder.main")
 
-STORAGE_HEALTH_INTERVAL_SECONDS = 15.0
+STORAGE_HEALTH_INTERVAL_SECONDS = 60.0
 
 
 def configure_logging() -> None:
@@ -151,15 +153,15 @@ async def run_bot() -> None:
         await bot.start(config.DISCORD_TOKEN)
 
 
-async def monitor_storage(storage: database.Storage) -> None:
-    """Keep the readiness component status of the database up to date."""
+async def monitor_storage(storage: Storage) -> None:
+    """Keep the readiness component status of the local JSON storage up to date."""
 
     while True:
         try:
             ok, detail = await storage.healthcheck()
         except Exception as exc:  # noqa: BLE001 - pragma: no cover - defensive
             ok, detail = False, f"healthcheck error: {exc}"
-        set_component("database", ok, detail)
+        set_component("storage", ok, detail)
         await asyncio.sleep(STORAGE_HEALTH_INTERVAL_SECONDS)
 
 
@@ -169,17 +171,16 @@ async def main() -> None:
     set_ready(False)
 
     try:
-        storage = await database.initialize_storage()
+        storage = await initialize_storage()
     except StorageError as exc:
         raise SystemExit(
-            "Database initialization failed "
+            "Local storage initialization failed "
             f"({exc.__class__.__name__}): {exc}. "
-            "Check DATABASE_BACKEND/DATABASE_URL or your Supabase settings; "
-            "see docs/self-hosting.md."
+            "Set DATA_DIR to a writable path; see docs/self-hosting.md."
         ) from exc
 
     ok, detail = await storage.healthcheck()
-    set_component("database", ok, detail)
+    set_component("storage", ok, detail)
     monitor = asyncio.create_task(monitor_storage(storage))
 
     start_web_thread()
@@ -215,8 +216,8 @@ async def main() -> None:
         monitor.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await monitor
-        await database.close_storage()
-        main_logger.info("Database connections closed")
+        await close_storage()
+        main_logger.info("Storage closed")
 
 
 if __name__ == "__main__":

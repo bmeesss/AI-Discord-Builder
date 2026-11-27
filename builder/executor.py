@@ -293,6 +293,22 @@ async def _execute_single_action(
 
         action["channel_id"] = channel.id
 
+        # Keep enough detail for a partial rollback (recreate the channel).
+        action["channel_name"] = channel.name
+        action["channel_type"] = (
+            "voice"
+            if isinstance(
+                channel,
+                (discord.VoiceChannel, discord.StageChannel)
+            )
+            else "text"
+        )
+        action["category_id"] = (
+            channel.category.id
+            if channel.category
+            else None
+        )
+
 
         await channel.delete(
             reason="AI-Discord-Builder"
@@ -508,6 +524,18 @@ async def _execute_single_action(
 
 
         action["role_id"] = role.id
+
+
+        # Keep enough detail for a partial rollback (recreate the role).
+        action["role_name"] = role.name
+        action["role_permissions"] = [
+            name
+            for name, enabled in role.permissions
+            if enabled
+        ]
+        action["role_color"] = str(role.color)
+        action["role_hoist"] = role.hoist
+        action["role_mentionable"] = role.mentionable
 
 
         ok = await roles.delete_role(

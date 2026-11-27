@@ -2,7 +2,7 @@
 
 /healthz — process liveness only (never exposes secrets).
 /readyz  — readiness: Discord runtime is up AND every required runtime
-           component (database backend, migrations) reported ready.
+           component (local JSON storage) reported ready.
 """
 
 from __future__ import annotations
@@ -49,26 +49,36 @@ def clear_components() -> None:
 
 
 def evaluate_readiness() -> tuple[dict, int]:
-    """Aggregate readiness; pure logic kept separate for unit tests."""
+    """Aggregate readiness; pure logic kept separate for unit tests.
+
+    The returned payload intentionally contains only component *statuses*.
+    Component details (connection errors, masked DSNs, exception text) stay
+    internal: /readyz is a public endpoint on hosted deployments and must
+    never expose sensitive or internal information.
+    """
 
     components = get_components()
     discord_ready = is_ready()
-    unhealthy = {
-        name: info["detail"]
+    statuses = {
+        name: ("ok" if info["ok"] else "unhealthy")
+        for name, info in components.items()
+    }
+    unhealthy = [
+        name
         for name, info in components.items()
         if not info["ok"]
-    }
+    ]
 
     if discord_ready and not unhealthy:
         return {
             "status": "ready",
-            "components": components,
+            "components": statuses,
         }, 200
 
     return {
         "status": "not ready",
         "discord": "ready" if discord_ready else "starting",
-        "components": components,
+        "components": statuses,
     }, 503
 
 
@@ -86,11 +96,16 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
-    """Readiness: Discord runtime and required components (database)."""
+    """Readiness: Discord runtime and required components (storage)."""
 
     payload, status = evaluate_readiness()
     return jsonify(payload), status
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    import os
+
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("WEB_PORT") or os.getenv("PORT") or 8080),
+    )

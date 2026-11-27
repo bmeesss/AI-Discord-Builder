@@ -1,32 +1,30 @@
-"""Database package — provider-neutrale storage-laag.
+"""Storage package — databasevrije JSON-bestandsopslag.
 
-Applicatiecode gebruikt alleen ``get_storage()`` en de protocols uit
-``database/interfaces.py``.  De gekozen backend (PostgreSQL of Supabase) is
-onsichtbaar voor services, commands en builder-code.
+Applicatiecode gebruikt uitsluitend ``get_storage()`` en de protocols uit
+``storage/interfaces.py``.  De backend is een lokale JSON-file store (zie
+``storage/json_store.py``): geen PostgreSQL, geen Supabase, geen SQLite,
+geen externe diensten, geen migraties.
 """
 
 from __future__ import annotations
 
-from database.errors import (
-    MigrationError,
+from storage.errors import (
     StorageError,
     StorageNotConfiguredError,
     StorageUnavailableError,
 )
-from database.factory import create_storage, resolve_backend
-from database.storage import Storage
+from storage.json_store import create_json_storage
+from storage.storage import Storage
 
 __all__ = [
-    "MigrationError",
     "Storage",
     "StorageError",
     "StorageNotConfiguredError",
     "StorageUnavailableError",
     "close_storage",
-    "create_storage",
+    "create_json_storage",
     "get_storage",
     "initialize_storage",
-    "resolve_backend",
     "set_storage",
 ]
 
@@ -34,26 +32,26 @@ _storage: Storage | None = None
 
 
 def get_storage() -> Storage:
-    """Return the active storage, creating it lazily without connecting."""
+    """Return the active storage, creating it lazily (no I/O until used)."""
 
     global _storage
     if _storage is None:
-        _storage = create_storage()
+        _storage = create_json_storage()
     return _storage
 
 
 async def initialize_storage() -> Storage:
-    """Connect, verify reachability and run migrations.  Fails loudly."""
+    """Create the data directory and verify it is writable.  Fails loudly."""
 
     global _storage
-    storage = _storage if _storage is not None else create_storage()
+    storage = _storage if _storage is not None else create_json_storage()
     await storage.initialize()
     _storage = storage
     return storage
 
 
 async def close_storage() -> None:
-    """Close connections gracefully (idempotent)."""
+    """Close the storage (idempotent; JSON files need no teardown)."""
 
     global _storage
     storage, _storage = _storage, None

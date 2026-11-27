@@ -13,6 +13,9 @@ Supported:
 - Restore renamed roles
 - Delete sent messages
 - Restore moved channels
+- Partially restore deleted channels/roles (recreated with the attributes
+  stored at delete time; message history, overwrites and role positions are
+  not restored)
 """
 
 import asyncio
@@ -547,6 +550,151 @@ async def rollback_single_action(
                 False,
                 "Missing permission to delete message"
             )
+
+
+
+    # =====================
+    # DELETE ROLLBACK (PARTIAL RESTORE)
+    # =====================
+    # Deleted channels/roles cannot be restored with their full content, but
+    # they can be recreated with the attributes stored at delete time.  This
+    # matches the "partial" rollback capability the AI is told about.
+
+    if action_type == "delete_channel":
+
+        name = action.get("channel_name") or action.get("name")
+
+        if not name:
+
+            return RollbackResult(
+                False,
+                "Missing channel information"
+            )
+
+
+        category = None
+
+        if action.get("category_id"):
+
+            category = guild.get_channel(
+                int(action["category_id"])
+            )
+
+
+        try:
+
+            if action.get("channel_type") == "voice":
+
+                channel = await safe_discord_action(
+                    guild.create_voice_channel(
+                        name,
+                        category=category,
+                        reason="AI rollback"
+                    )
+                )
+
+            else:
+
+                channel = await safe_discord_action(
+                    guild.create_text_channel(
+                        name,
+                        category=category,
+                        reason="AI rollback"
+                    )
+                )
+
+
+        except Exception as e:
+
+            logger.exception(
+                "Channel recreate failed"
+            )
+
+            return RollbackResult(
+                False,
+                f"Channel recreate failed: {e}"
+            )
+
+
+        return RollbackResult(
+            True,
+            f"Recreated #{channel.name} (content not restored)"
+        )
+
+
+
+    if action_type == "delete_role":
+
+        name = action.get("role_name") or action.get("name")
+
+        if not name:
+
+            return RollbackResult(
+                False,
+                "Missing role information"
+            )
+
+
+        try:
+
+            from builder.roles import build_permissions
+
+            permissions = build_permissions(
+                action.get("role_permissions") or []
+            )
+
+            color = discord.Color.default()
+
+            if action.get("role_color"):
+
+                try:
+
+                    color = discord.Color(
+                        int(
+                            str(
+                                action["role_color"]
+                            ).replace("#", ""),
+                            16
+                        )
+                    )
+
+                except ValueError:
+
+                    pass
+
+
+            role = await safe_discord_action(
+                guild.create_role(
+                    name=name,
+                    permissions=permissions,
+                    color=color,
+                    hoist=bool(
+                        action.get("role_hoist", False)
+                    ),
+                    mentionable=bool(
+                        action.get("role_mentionable", False)
+                    ),
+                    reason="AI rollback"
+                )
+            )
+
+
+        except Exception as e:
+
+            logger.exception(
+                "Role recreate failed"
+            )
+
+            return RollbackResult(
+                False,
+                f"Role recreate failed: {e}"
+            )
+
+
+        return RollbackResult(
+            True,
+            f"Recreated role {role.name} (position not restored)"
+        )
 
 
 

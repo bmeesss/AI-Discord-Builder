@@ -1,13 +1,21 @@
-"""builder/history integration with the storage layer (injected fakes)."""
+"""builder/history + JSON storage integration.
+
+Two layers are covered:
+1. history delegates to the injected storage (fakes) and swallows failures;
+2. the real JSON store round-trips rollback history with guild isolation.
+"""
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from builder import history
-from database import set_storage
+from storage import set_storage
+from storage.json_store import create_json_storage
 
 
 def make_storage(**overrides) -> SimpleNamespace:
@@ -23,7 +31,7 @@ def make_storage(**overrides) -> SimpleNamespace:
     return storage
 
 
-class HistoryStorageTests(unittest.IsolatedAsyncioTestCase):
+class HistoryDelegationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.storage = make_storage()
         set_storage(self.storage)
@@ -58,57 +66,66 @@ class HistoryStorageTests(unittest.IsolatedAsyncioTestCase):
 
         self.storage.actions.get_history.side_effect = RuntimeError("down")
         self.assertEqual(await history.get_history(42), [])
-        self.assertEqual(await history.get_history_count(42), 0)
 
-    async def test_remove_last_actions_delegates(self):
-        await history.remove_last_actions(42, 2)
-        self.storage.actions.remove_last_actions.assert_awaited_once_with(
-            "42",
-            2,
-        )
+    async def test_remove_and_clear_swallow_failures(self):
+        self.storage.actions.remove_last_actions.side_effect = RuntimeError("down")
+        await history.remove_last_actions(42, 1)  # must not raise
 
-    async def test_clear_history_delegates(self):
-        await history.clear_history(42)
-        self.storage.actions.clear_history.assert_awaited_once_with("42")
+        self.storage.actions.clear_history.side_effect = RuntimeError("down")
+        await history.clear_history(42)  # must not raise
 
 
-class ConversationWrapperTests(unittest.IsolatedAsyncioTestCase):
+class JsonHistoryRoundtripTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.storage = make_storage()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self._tmp.name) / "data"
+        self.storage = create_json_storage(self.data_dir)
         set_storage(self.storage)
 
     def tearDown(self):
         set_storage(None)
+        self._tmp.cleanup()
 
-    async def test_save_conversation_delegates_to_storage(self):
-        from database.conversations import save_conversation
+    async def test_roundtrip_newest_first_and_guild_isolation(self):
+        await history.add_action(1, {"type": "a"}, 9)
+        await history.add_action(1, {"type": "b"}, 9)
+        await history.add_action(2, {"type": "other"}, 9)
 
-        response = '{"summary": "plan", "actions": []}'
-        await save_conversation(1, 2, "mod", "maak kanaal", response)
+        last = await history.get_last_actions(1, 10)
+        self.assertEqual([entry["action"]["type"] for entry in last], ["b", "a"])
 
-        repo = self.storage.conversations
-        repo.save_conversation.assert_awaited_once()
-        kwargs = repo.save_conversation.await_args.kwargs
-        self.assertEqual(kwargs["guild_id"], "1")
-        self.assertEqual(kwargs["user_id"], "2")
-        self.assertEqual(kwargs["ai_plan"], {"summary": "plan", "actions": []})
+        full = await history.get_history(1)
+        self.assertEqual([entry["action"]["type"] for entry in full], ["a", "b"])
 
-    async def test_save_conversation_wraps_non_json_response(self):
-        from database.conversations import save_conversation
-
-        await save_conversation(1, 2, "mod", "maak kanaal", "not-json")
-
-        kwargs = self.storage.conversations.save_conversation.await_args.kwargs
-        self.assertEqual(kwargs["ai_plan"], {"raw": "not-json"})
-
-    async def test_save_conversation_never_raises(self):
-        from database.conversations import save_conversation
-
-        self.storage.conversations.save_conversation.side_effect = RuntimeError(
-            "down"
+        # Guild 2 never sees guild 1 data.
+        self.assertEqual(
+            [entry["action"]["type"] for entry in await history.get_history(2)],
+            ["other"],
         )
-        # Must not propagate: persistence failure never breaks the Discord flow.
-        await save_conversation(1, 2, "mod", "maak kanaal", "{}")
+
+    async def test_remove_last_actions_and_clear(self):
+        await history.add_action(1, {"type": "a"}, None)
+        await history.add_action(1, {"type": "b"}, None)
+
+        await history.remove_last_actions(1, 1)
+        remaining = await history.get_history(1)
+        self.assertEqual([entry["action"]["type"] for entry in remaining], ["a"])
+
+        await history.clear_history(1)
+        self.assertEqual(await history.get_history(1), [])
+
+    async def test_history_survives_a_restart(self):
+        await history.add_action(1, {"type": "create_channel"}, 9)
+
+        # "Restart": a fresh storage object over the same directory.
+        set_storage(create_json_storage(self.data_dir))
+        last = await history.get_last_actions(1, 1)
+        self.assertEqual(last[0]["action"]["type"], "create_channel")
+
+    async def test_history_count(self):
+        await history.add_action(1, {"type": "a"}, None)
+        await history.add_action(1, {"type": "b"}, None)
+        self.assertEqual(await history.get_history_count(1), 2)
 
 
 if __name__ == "__main__":

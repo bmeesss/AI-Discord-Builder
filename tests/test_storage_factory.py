@@ -1,106 +1,76 @@
-"""Backend selection and storage factory tests."""
+"""Storage facade tests — the bot creates its storage without any database
+configuration.  Everything is backed by local JSON files.
+"""
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from database.errors import StorageNotConfiguredError
-from database.factory import (
-    DEFAULT_DATABASE_BACKEND,
-    create_storage,
-    resolve_backend,
+from storage import (
+    Storage,
+    close_storage,
+    create_json_storage,
+    get_storage,
+    initialize_storage,
+    set_storage,
+)
+from storage.interfaces import (
+    ActionRepository,
+    AnalysisRepository,
+    ConversationRepository,
+    MemoryRepository,
+    TemplateRepository,
 )
 
-POSTGRES_ENV = {
-    "DATABASE_BACKEND": "postgres",
-    "DATABASE_URL": "postgresql://user:pass@db:5432/builder",
-    "DB_POOL_MIN_SIZE": "1",
-    "DB_POOL_MAX_SIZE": "10",
-    "DB_MIGRATE_ON_STARTUP": "true",
-}
 
-SUPABASE_ENV = {
-    "DATABASE_BACKEND": "supabase",
-    "SUPABASE_URL": "https://example.supabase.co",
-    "SUPABASE_KEY": "anon-key",
-}
+class JsonStorageFactoryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self._tmp.name) / "data"
 
+    def tearDown(self):
+        self._tmp.cleanup()
 
-class ResolveBackendTests(unittest.TestCase):
-    def test_explicit_postgres(self):
-        self.assertEqual(resolve_backend(POSTGRES_ENV), "postgres")
+    async def asyncTearDown(self):
+        await close_storage()
 
-    def test_explicit_supabase(self):
-        self.assertEqual(resolve_backend(SUPABASE_ENV), "supabase")
+    def test_create_json_storage_needs_no_configuration(self):
+        storage = create_json_storage(self.data_dir)
+        self.assertIsInstance(storage, Storage)
+        self.assertEqual(storage.backend, "json")
 
-    def test_unknown_backend_raises(self):
-        with self.assertRaises(StorageNotConfiguredError):
-            resolve_backend({"DATABASE_BACKEND": "mysql"})
+    def test_repositories_satisfy_the_protocols(self):
+        storage = create_json_storage(self.data_dir)
+        self.assertIsInstance(storage.actions, ActionRepository)
+        self.assertIsInstance(storage.conversations, ConversationRepository)
+        self.assertIsInstance(storage.memories, MemoryRepository)
+        self.assertIsInstance(storage.analysis, AnalysisRepository)
+        self.assertIsInstance(storage.templates, TemplateRepository)
 
-    def test_default_is_postgres(self):
-        self.assertEqual(DEFAULT_DATABASE_BACKEND, "postgres")
-        self.assertEqual(resolve_backend({}), "postgres")
+    async def test_initialize_creates_data_dir(self):
+        storage = create_json_storage(self.data_dir)
+        await storage.initialize()
+        self.assertTrue(self.data_dir.is_dir())
 
-    def test_legacy_supabase_only_auto_selects_supabase(self):
-        environ = {
-            "SUPABASE_URL": "https://example.supabase.co",
-            "SUPABASE_KEY": "anon-key",
-        }
-        self.assertEqual(resolve_backend(environ), "supabase")
+    async def test_get_storage_defaults_to_json(self):
+        await close_storage()
+        storage = get_storage()
+        self.assertEqual(storage.backend, "json")
 
-    def test_database_url_wins_over_legacy_supabase(self):
-        environ = {
-            "SUPABASE_URL": "https://example.supabase.co",
-            "SUPABASE_KEY": "anon-key",
-            "DATABASE_URL": "postgresql://u:p@localhost/builder",
-        }
-        self.assertEqual(resolve_backend(environ), "postgres")
+    async def test_set_storage_injects_and_resets(self):
+        fake = create_json_storage(self.data_dir)
+        set_storage(fake)
+        self.assertIs(get_storage(), fake)
+        set_storage(None)
 
-
-class CreateStorageTests(unittest.TestCase):
-    def test_postgres_storage_shape(self):
-        storage = create_storage(POSTGRES_ENV)
-        self.assertEqual(storage.backend, "postgres")
-        for attribute in (
-            "actions",
-            "conversations",
-            "memories",
-            "analysis",
-            "templates",
-        ):
-            self.assertTrue(hasattr(storage, attribute), attribute)
-
-    def test_postgres_requires_valid_dsn_at_build_time(self):
-        environ = dict(POSTGRES_ENV)
-        del environ["DATABASE_URL"]
-        with self.assertRaises(StorageNotConfiguredError):
-            create_storage(environ)
-
-    def test_pool_size_validation(self):
-        environ = dict(POSTGRES_ENV, DB_POOL_MAX_SIZE="0")
-        with self.assertRaises(StorageNotConfiguredError):
-            create_storage(environ)
-
-        environ = dict(POSTGRES_ENV, DB_POOL_MAX_SIZE="abc")
-        with self.assertRaises(StorageNotConfiguredError):
-            create_storage(environ)
-
-    def test_supabase_requires_credentials(self):
-        with self.assertRaises(StorageNotConfiguredError):
-            create_storage({"DATABASE_BACKEND": "supabase"})
-
-    def test_supabase_storage_shape(self):
-        # Creating the client performs no network calls.
-        storage = create_storage(SUPABASE_ENV)
-        self.assertEqual(storage.backend, "supabase")
-        for attribute in (
-            "actions",
-            "conversations",
-            "memories",
-            "analysis",
-            "templates",
-        ):
-            self.assertTrue(hasattr(storage, attribute), attribute)
+    async def test_initialize_storage_uses_the_singleton(self):
+        await close_storage()
+        set_storage(create_json_storage(self.data_dir))
+        storage = await initialize_storage()
+        self.assertIs(get_storage(), storage)
+        self.assertTrue(self.data_dir.is_dir())
 
 
 if __name__ == "__main__":

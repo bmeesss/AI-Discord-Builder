@@ -1,0 +1,56 @@
+# Render Blueprint for AI-Discord-Builder — 100% FREE, database-free.
+#
+# What this deploys: ONE Free web service that runs the Dockerfile in this
+# repository. No databases, no paid resources, no extra services.
+#
+# ── IMPORTANT: how Render Free actually behaves (verified against the current
+#    Render docs, https://render.com/docs/free) ─────────────────────────────
+# * A Free web service SPINS DOWN after 15 minutes without INBOUND traffic
+#   (HTTP requests or WebSocket messages on existing inbound connections).
+# * The Discord Gateway connection is an OUTBOUND WebSocket from the service.
+#   It does NOT count as inbound traffic and therefore does NOT keep the
+#   service awake on its own.
+# * In practice the bot stays online because UptimeRobot Free polls
+#   https://<name>.onrender.com/readyz every 5 minutes (inbound HTTP). That
+#   monitoring IS the keep-alive; if it stops for >15 minutes the service
+#   spins down and the bot is offline until the next poll triggers a spin-up
+#   (about 1 minute).
+# * All local files (the JSON history in DATA_DIR) are on an ephemeral disk:
+#   they are LOST on every redeploy, restart or spin-down.
+# * Render may restart a Free web service at any time, and may suspend free
+#   services that initiate unusually high outbound traffic (e.g. calling AI
+#   APIs continuously) — see "Free web services" in the Render docs.
+#
+# Deployment steps: see docs/render.md. In short: push this repo to GitHub,
+# then Render Dashboard -> New -> Blueprint -> select the repo. Render asks
+# for the secret values below (DISCORD_TOKEN, GROQ_API_KEY, ...) once.
+#
+# Never put real tokens or API keys in this file.
+
+services:
+  - type: web
+    name: ai-discord-builder
+    runtime: docker            # builds from the Dockerfile in this repository
+    plan: free                 # €0 — the only plan this project uses
+    numInstances: 1            # exactly ONE instance: a bot must not run twice
+    healthCheckPath: /healthz  # liveness; UptimeRobot monitors /readyz
+    autoDeployTrigger: checksPass  # deploy only when the GitHub CI checks pass
+    envVars:
+      # --- Secrets: Render prompts for these once and never stores them here.
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # --- Provider selection: enter "groq" (recommended) or "openai".
+      # ("ollama" needs a reachable Ollama server and is not practical on Render.)
+      - key: AI_PROVIDER
+        sync: false
+      # --- Local JSON storage lives in the container's ephemeral filesystem.
+      - key: DATA_DIR
+        value: /app/data
+
+# Deliberately NO databases section: the bot stores everything in local JSON
+# files (storage/json_store.py). There is no PostgreSQL, Supabase, SQLite or
+# any other data service in this architecture.

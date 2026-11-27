@@ -1,3 +1,11 @@
+"""Configuration validation tests — database-free.
+
+The bot must start with nothing more than a Discord token and an AI provider
+configuration; there is deliberately no database configuration to validate.
+"""
+
+from __future__ import annotations
+
 import unittest
 
 import config
@@ -11,8 +19,6 @@ def base_environ(**overrides):
         "OLLAMA_BASE_URL": "http://localhost:11434",
         "OLLAMA_MODEL": "qwen3:4b",
         "DISCORD_TOKEN": "test-token",
-        "DATABASE_BACKEND": "postgres",
-        "DATABASE_URL": "postgresql://user:pass@localhost:5432/builder",
     }
     environ.update(overrides)
     return environ
@@ -40,7 +46,7 @@ class ConfigTests(unittest.TestCase):
                 ),
             )
 
-    def test_groq_with_postgres_backend_is_valid(self):
+    def test_groq_with_minimal_config_is_valid(self):
         config.validate_config(
             environ=base_environ(
                 AI_PROVIDER="groq",
@@ -48,81 +54,60 @@ class ConfigTests(unittest.TestCase):
             ),
         )
 
-
-class DatabaseConfigTests(unittest.TestCase):
-    def test_postgres_backend_requires_database_url(self):
-        environ = base_environ()
-        del environ["DATABASE_URL"]
-        # DATABASE_BACKEND explicitly postgres: no auto-fallback.
-        with self.assertRaises(RuntimeError) as ctx:
-            config.validate_config(environ=environ)
-        self.assertIn("DATABASE_URL", str(ctx.exception))
-
-    def test_missing_url_and_backend_defaults_to_postgres(self):
-        environ = base_environ()
-        del environ["DATABASE_URL"]
-        del environ["DATABASE_BACKEND"]
-        with self.assertRaises(RuntimeError) as ctx:
-            config.validate_config(environ=environ)
-        self.assertIn("DATABASE_URL", str(ctx.exception))
-
-    def test_invalid_database_url_is_rejected(self):
-        with self.assertRaises(RuntimeError):
-            config.validate_config(
-                environ=base_environ(DATABASE_URL="not-a-dsn"),
-            )
-
-    def test_unknown_backend_is_rejected(self):
-        with self.assertRaises(RuntimeError) as ctx:
-            config.validate_config(
-                environ=base_environ(DATABASE_BACKEND="mysql"),
-            )
-        self.assertIn("DATABASE_BACKEND", str(ctx.exception))
-
-    def test_supabase_backend_requires_both_settings(self):
-        environ = base_environ(
-            DATABASE_BACKEND="supabase",
-            SUPABASE_URL="https://example.supabase.co",
-        )
-        del environ["DATABASE_URL"]
-        with self.assertRaises(RuntimeError) as ctx:
-            config.validate_config(environ=environ)
-        self.assertIn("SUPABASE_KEY", str(ctx.exception))
-
-    def test_supabase_backend_is_valid_with_both_settings(self):
+    def test_openai_with_key_is_valid(self):
         config.validate_config(
             environ=base_environ(
-                DATABASE_BACKEND="supabase",
-                SUPABASE_URL="https://example.supabase.co",
-                SUPABASE_KEY="anon-key",
+                AI_PROVIDER="openai",
+                OPENAI_API_KEY="test-key",
             ),
         )
 
-    def test_supabase_backend_needs_no_database_url(self):
-        environ = base_environ(
-            DATABASE_BACKEND="supabase",
-            SUPABASE_URL="https://example.supabase.co",
-            SUPABASE_KEY="anon-key",
-        )
-        del environ["DATABASE_URL"]
-        config.validate_config(environ=environ)
 
-    def test_legacy_supabase_only_deployment_auto_detects(self):
-        """Existing installs with only Supabase keys keep working."""
+class NoDatabaseConfigTests(unittest.TestCase):
+    def test_validation_needs_no_database_settings(self):
+        """The core requirement: a valid config without any database vars."""
 
-        environ = base_environ(
-            SUPABASE_URL="https://example.supabase.co",
-            SUPABASE_KEY="anon-key",
-        )
-        del environ["DATABASE_BACKEND"]
-        del environ["DATABASE_URL"]
-        config.validate_config(environ=environ)
-
-    def test_require_database_can_be_disabled_for_tooling(self):
         environ = base_environ()
-        del environ["DATABASE_URL"]
-        del environ["DATABASE_BACKEND"]
-        config.validate_config(environ=environ, require_database=False)
+        for banned in (
+            "DATABASE_URL",
+            "DATABASE_BACKEND",
+            "SUPABASE_URL",
+            "SUPABASE_KEY",
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD",
+            "POSTGRES_DB",
+            "DB_POOL_MIN_SIZE",
+            "DB_POOL_MAX_SIZE",
+            "DB_MIGRATE_ON_STARTUP",
+        ):
+            self.assertNotIn(banned, environ)
+
+        config.validate_config(environ=environ)
+
+    def test_database_settings_are_simply_ignored(self):
+        """Legacy .env files with old database vars must not break anything."""
+
+        config.validate_config(
+            environ=base_environ(
+                DATABASE_URL="postgresql://user:pass@localhost:5432/db",
+                DATABASE_BACKEND="postgres",
+                SUPABASE_URL="https://example.supabase.co",
+                SUPABASE_KEY="anon",
+            ),
+        )
+
+    def test_config_module_defines_no_database_settings(self):
+        for banned in (
+            "DATABASE_URL",
+            "DATABASE_BACKEND",
+            "SUPABASE_URL",
+            "SUPABASE_KEY",
+            "VALID_DATABASE_BACKENDS",
+        ):
+            self.assertNotIn(banned, config.__dict__)
+
+    def test_data_dir_setting_exists(self):
+        self.assertTrue(config.DATA_DIR)
 
 
 if __name__ == "__main__":

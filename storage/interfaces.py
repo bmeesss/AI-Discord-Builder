@@ -1,13 +1,13 @@
-"""Provider-neutrale storage-interfaces.
+"""Provider-neutral storage interfaces.
 
-Application code depends on these protocols only.  Whether the concrete
-backend is PostgreSQL or Supabase is decided by the storage factory and is
-invisible to services, commands and the builder layer.
+Application code depends on these protocols only.  The concrete backend is a
+local JSON-file store (``storage/json_store.py``); there is deliberately no
+database, no external service and no network connection involved.
 
 Security boundary: repositories persist state/history only.  They never
 decide whether a Discord action is allowed.  Guild isolation is enforced
-server-side inside every repository method; callers always pass the guild
-scope explicitly and records from other guilds are never returned.
+inside every repository method; callers always pass the guild scope
+explicitly and records from other guilds are never returned.
 """
 
 from __future__ import annotations
@@ -128,16 +128,16 @@ class TemplateRepository(Protocol):
 
 
 class StorageBackend(Protocol):
-    """Lifecycle of one concrete storage implementation."""
+    """Lifecycle of the concrete storage implementation."""
 
     name: str
 
     async def initialize(self) -> None:
-        """Connect, verify and (optionally) migrate.  Fail loudly."""
+        """Prepare local storage (create the data directory).  Fail loudly."""
         ...
 
     async def close(self) -> None:
-        """Release connections gracefully."""
+        """Release resources gracefully."""
         ...
 
     async def healthcheck(self) -> tuple[bool, str]:

@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 
 from ai.models import ConversationSummary
-from database import get_storage
-from database.interfaces import ConversationRepository
+from storage import get_storage
+from storage.interfaces import ConversationRepository
 
 logger = logging.getLogger("ai_discord_builder.conversation_intelligence")
 
