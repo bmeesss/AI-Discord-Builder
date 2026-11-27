@@ -51,17 +51,17 @@ class AIProvider(Protocol):
 
 
 class ProviderSettings(Protocol):
-    """Structural typing helper used by the provider factory in tests."""
+    """Structural typing helper used by the provider factory in tests.
+
+    Provider-specific keys and models are read through ``getattr`` against
+    the env-var names in :mod:`ai.providers.registry`, so only the generic
+    settings are part of this contract.
+    """
 
     AI_PROVIDER: str
-    GROQ_API_KEY: str | None
-    GROQ_MODEL: str
-    OPENAI_API_KEY: str | None
-    OPENAI_MODEL: str
-    OPENAI_BASE_URL: str | None
-    OLLAMA_BASE_URL: str
-    OLLAMA_MODEL: str
     AI_REQUEST_TIMEOUT_SECONDS: int
+
+    def __getattr__(self, name: str) -> Any: ...
 
 
 JSON = dict[str, Any]

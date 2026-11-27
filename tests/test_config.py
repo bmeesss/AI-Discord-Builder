@@ -110,5 +110,49 @@ class NoDatabaseConfigTests(unittest.TestCase):
         self.assertTrue(config.DATA_DIR)
 
 
+class CloudProviderConfigTests(unittest.TestCase):
+    """Every registered cloud provider validates exactly its own key."""
+
+    def test_each_provider_needs_its_own_api_key(self):
+        from ai.providers.registry import CLOUD_PRESETS
+
+        for name, preset in CLOUD_PRESETS.items():
+            with self.subTest(provider=name):
+                config.validate_config(
+                    environ=base_environ(
+                        AI_PROVIDER=name,
+                        **{preset.api_key_env: "test-key"},
+                    ),
+                )
+
+                with self.assertRaises(RuntimeError) as ctx:
+                    config.validate_config(environ=base_environ(AI_PROVIDER=name))
+                self.assertIn(preset.api_key_env, str(ctx.exception))
+                self.assertIn("Missing required environment variables", str(ctx.exception))
+
+    def test_unknown_provider_message_lists_new_providers(self):
+        from ai.providers.registry import CLOUD_PRESETS
+
+        with self.assertRaises(RuntimeError) as ctx:
+            config.validate_config(
+                environ=base_environ(AI_PROVIDER="does-not-exist"),
+            )
+        for name in CLOUD_PRESETS:
+            self.assertIn(name, str(ctx.exception))
+
+    def test_model_defaults_match_the_registry(self):
+        import os
+
+        from ai.providers.registry import CLOUD_PRESETS
+
+        for preset in CLOUD_PRESETS.values():
+            if os.getenv(preset.model_env) is None:
+                with self.subTest(model_env=preset.model_env):
+                    self.assertEqual(
+                        getattr(config, preset.model_env),
+                        preset.default_model,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,7 +35,26 @@ _PATTERNS = (
 # Read by code but documented as commented-out optional lines in .env.example.
 # (empty means: everything must be documented as an active line or via the
 # commented-opt-in mechanism below)
-_COMMENTED_OPT_INS = {"OPENAI_BASE_URL", "PORT"}
+_COMMENTED_OPT_INS = {
+    "OPENAI_BASE_URL",
+    "PORT",
+    "GEMINI_API_KEY",
+    "GEMINI_MODEL",
+    "MISTRAL_API_KEY",
+    "MISTRAL_MODEL",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+    "DEEPSEEK_API_KEY",
+    "DEEPSEEK_MODEL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "XAI_API_KEY",
+    "XAI_MODEL",
+    "TOGETHER_API_KEY",
+    "TOGETHER_MODEL",
+    "PERPLEXITY_API_KEY",
+    "PERPLEXITY_MODEL",
+}
 
 # Documented in .env.example but only consumed by Compose interpolation.
 _COMPOSE_ONLY = {"OLLAMA_HOST_PORT"}

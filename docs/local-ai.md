@@ -4,8 +4,8 @@ Local AI is volledig optioneel. AI Discord Builder blijft Groq en OpenAI
 ondersteunen. Kies `AI_PROVIDER=ollama` alleen als je model lokaal wilt draaien.
 
 Wanneer Ollama lokaal wordt gebruikt, worden prompts naar de lokale Ollama-URL
-verstuurd en niet naar Groq of OpenAI. Let op: de Discord bot zelf communiceert
-uiteraard nog steeds met Discord.
+verstuurd en niet naar een cloud-provider. Let op: de Discord bot zelf
+communiceert uiteraard nog steeds met Discord.
 
 ## Hardware en modelkeuze
 
@@ -149,7 +149,9 @@ behouden.
 
 ## Cloud AI blijft beschikbaar
 
-Voor Groq:
+Cloud-AI werkt met alle providers uit de README-tabel (Groq, Google Gemini,
+Mistral, OpenRouter, DeepSeek, Anthropic, xAI, Together AI, Perplexity,
+OpenAI). Voorbeeld voor Groq:
 
 ```env
 AI_PROVIDER=groq
@@ -157,13 +159,8 @@ GROQ_API_KEY=...
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
-Voor OpenAI:
-
-```env
-AI_PROVIDER=openai
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4o-mini
-```
+Zie [README](../README.md#cloud-ai-configureren) voor alle providers en
+hun `<PROVIDER>_API_KEY`/`<PROVIDER>_MODEL`-instellingen.
 
 Cloud-only installaties importeren of starten geen Ollama-service en downloaden
 geen lokale modellen.

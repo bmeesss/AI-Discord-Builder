@@ -21,6 +21,7 @@ from dataclasses import asdict
 import config
 from ai.client import AIClient, AIPlanError
 from ai.providers.base import ProviderError
+from ai.providers.registry import CLOUD_PRESETS
 from setup.config_writer import build_local_ai_config, update_env_file
 from setup.local_ai import LocalAIReport, LocalAISetupManager, SetupState
 
@@ -193,29 +194,36 @@ def run_setup(args: argparse.Namespace) -> int:
 
 
 def run_cloud_setup(args: argparse.Namespace) -> int:
+    cloud_names = tuple(CLOUD_PRESETS)
     if args.yes:
         provider = os.getenv("AI_PROVIDER", "groq").strip().lower()
     elif sys.stdin.isatty():
-        print("1. Groq")
-        print("2. OpenAI")
-        provider = {"1": "groq", "2": "openai"}.get(
-            input("Choose a cloud provider [1-2]: ").strip(),
-            "",
-        )
+        for index, name in enumerate(cloud_names, start=1):
+            print(f"{index}. {CLOUD_PRESETS[name].display}")
+        choice = input(f"Choose a cloud provider [1-{len(cloud_names)}]: ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(cloud_names):
+            provider = cloud_names[int(choice) - 1]
+        else:
+            provider = ""
     else:
         provider = ""
 
-    if provider not in {"groq", "openai"}:
-        print("Choose either Groq or OpenAI. API keys are never written by this command.")
+    if provider not in CLOUD_PRESETS:
+        print(
+            "Choose one of the listed providers. "
+            "API keys are never written by this command."
+        )
         return 1
 
-    values = {"AI_PROVIDER": provider}
-    if provider == "groq":
-        values["GROQ_MODEL"] = args.model or config.GROQ_MODEL
-        print("Set GROQ_API_KEY in .env; the setup command will not ask for or print it.")
-    else:
-        values["OPENAI_MODEL"] = args.model or config.OPENAI_MODEL
-        print("Set OPENAI_API_KEY in .env; the setup command will not ask for or print it.")
+    preset = CLOUD_PRESETS[provider]
+    values = {
+        "AI_PROVIDER": provider,
+        preset.model_env: args.model or getattr(config, preset.model_env),
+    }
+    print(
+        f"Set {preset.api_key_env} in .env; "
+        "the setup command will not ask for or print it."
+    )
 
     try:
         update_env_file(args.env_file, values)

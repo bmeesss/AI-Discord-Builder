@@ -91,7 +91,10 @@ Volg "Discord bot configureren" in de [README](../README.md#discord-bot-configur
 Je hebt straks nodig:
 
 - de **Bot Token** (Developer Portal → Bot → Reset Token);
-- een AI-key: **Groq** (aanbevolen, gratis tier beschikbaar) of **OpenAI**;
+- een AI-key: **Groq** of **Google Gemini** (beide gratis tier), **Mistral**
+  (gratis Experiment-plan), **OpenRouter** (gratis modellen), of een betaalde
+  provider (OpenAI, DeepSeek, Anthropic, xAI, Together AI, Perplexity) — zie
+  de providertabel in de [README](../README.md#cloud-ai-configureren);
 - de bot-uitnodigings-URL met scopes `bot` + `applications.commands` en de
   rechten `Manage Channels`, `Manage Roles`, `Send Messages`.
 
@@ -113,9 +116,14 @@ Render deploait vanuit GitHub (geen zip-uploads).
    **Free**. Er verschijnt géén database.
 4. Render vraagt éénmalig de geheime waarden (deze staan **nooit** in git):
    - `DISCORD_TOKEN` — je Discord bot-token;
-   - `GROQ_API_KEY` — je Groq-key (laat leeg bij OpenAI);
-   - `OPENAI_API_KEY` — je OpenAI-key (laat leeg bij Groq);
-   - `AI_PROVIDER` — typ `groq` (of `openai`).
+   - `GROQ_API_KEY` — je Groq-key (laat leeg als je die niet gebruikt);
+   - `OPENAI_API_KEY` — je OpenAI-key (laat leeg als je die niet gebruikt);
+   - `AI_PROVIDER` — typ de provider uit de README-tabel, bijv. `groq`, `gemini`,
+     `mistral`, `openrouter`, `deepseek`, `anthropic`, `xai`, `together`,
+     `perplexity` of `openai`.
+   - Gebruik je een andere provider dan Groq/OpenAI? Voeg dan na het deployen
+     `<PROVIDER>_API_KEY` (bijv. `GEMINI_API_KEY`) toe bij **Environment** in
+     het Render-dashboard.
 5. Bevestig. Render bouwt de Docker-image en start de bot. Er zijn geen
    migraties of database-stappen.
 
@@ -158,9 +166,12 @@ Let op: elke deploy wist de JSON-bestanden (sectie 3).
 ## 6. Welke environment variables zet ik waar?
 
 Op Render hoef je bijna niets te doen: `DATA_DIR` en `PORT` zijn automatisch.
-De enige variabelen die je zelf invult zijn de vier die Render bij het
+De variabelen die je zelf invult zijn de geheimen die Render bij het
 Blueprint-vraagt: `DISCORD_TOKEN`, `AI_PROVIDER`, `GROQ_API_KEY`/
-`OPENAI_API_KEY`. De volledige tabel staat in
+`OPENAI_API_KEY`. Gebruik je een andere provider (Gemini, Mistral, DeepSeek,
+Anthropic, xAI, Together AI, Perplexity), voeg dan de bijbehorende
+`<PROVIDER>_API_KEY` (en eventueel `<PROVIDER>_MODEL`) toe bij
+**Environment**. De volledige tabel staat in
 [self-hosting.md](self-hosting.md#complete-configuratietabel).
 
 Wil je later iets bijstellen (bijv. `MAX_ACTIONS_PER_PLAN` of `LOG_LEVEL`),
@@ -173,8 +184,9 @@ jouw beheer.
 
 `AI_PROVIDER=ollama` vereist een bereikbare Ollama-server en dat is op een
 Free web service niet mogelijk (geen resources voor, geen persistent disk).
-Gebruik op Render Groq of OpenAI. Lokaal of via Docker Compose draait Ollama
-wél; zie [local-ai.md](local-ai.md).
+Gebruik op Render een cloud-provider (Groq, Gemini en Mistral hebben een
+gratis tier). Lokaal of via Docker Compose draait Ollama wél; zie
+[local-ai.md](local-ai.md).
 
 ## 8. Problemen oplossen
 
@@ -184,7 +196,7 @@ wél; zie [local-ai.md](local-ai.md).
 | `/readyz` geeft 503, `discord: starting` | De bot kon niet inloggen — controleer `DISCORD_TOKEN` en de Logs. |
 | `/readyz` geeft 503, `components.storage: unhealthy` | De container-schijf is niet beschrijfbaar; check de Logs. |
 | Deploy faalt met "port detection" | De service luistert niet op `PORT`. Deze repo lost dit automatisch op; zorg dat je de laatste code draait. |
-| Logs: `Missing required environment variables: GROQ_API_KEY` | Je koos `AI_PROVIDER=groq` maar vulde de key niet in. Vul de key bij **Environment**. |
+| Logs: `Missing required environment variables: GROQ_API_KEY` (of een andere `<PROVIDER>_API_KEY`) | Je koos een provider waarvan de key niet is gezet. Vul de key bij **Environment**. |
 | Slash-commands verschijnen niet in Discord | Commands worden per guild gesynct bij `on_ready`; wacht ~1 minuut na een deploy/herstart en check de Logs op `Synced N commands to guild`. |
 | `/rollback` zegt "No history found" | De JSON-history is gewist door een herstart/redeploy/slaapstand — verwacht op Render Free (sectie 3). |
 | Service geschorst door Render | Waarschijnlijk door de "service-initiated traffic"-drempel (AI-API-calls) of overschreden free hours; zie de Render-docs over Free-beperkingen. |
@@ -194,6 +206,8 @@ wél; zie [local-ai.md](local-ai.md).
 - Render Free web service: **€0** (750 gratis instance-uren per maand per
   workspace).
 - UptimeRobot Free: **€0** (50 monitors, interval 5 minuten).
-- Groq: gratis tier beschikbaar; OpenAI is betaald per gebruik.
+- Groq, Google Gemini en Mistral hebben een gratis tier; OpenRouter biedt
+  gratis modellen (~50 requests/dag); OpenAI, DeepSeek, Anthropic, xAI,
+  Together AI en Perplexity zijn betaald per gebruik.
 
 Er zijn geen andere resources nodig.

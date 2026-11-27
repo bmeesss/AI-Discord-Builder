@@ -15,11 +15,22 @@ De bot is **volledig databasevrij en gratis te draaien**:
 - draait op **Render Free (€0/maand)** met **UptimeRobot Free** als monitor —
   of gewoon lokaal/via Docker.
 
-Ondersteunde AI-providers:
+Ondersteunde AI-providers (alle cloud-providers via één OpenAI-compatibele
+API — geen extra dependencies):
 
-- Groq (cloud);
-- OpenAI (cloud);
-- Ollama (optionele lokale AI).
+| Provider | `AI_PROVIDER` | API-key | Standaardmodel | Kosten |
+| --- | --- | --- | --- | --- |
+| Groq | `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | gratis tier |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` | `gemini-4-hydrogen` | gratis tier |
+| Mistral | `mistral` | `MISTRAL_API_KEY` | `mistral-small-latest` | gratis Experiment-plan |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `openrouter/free` | 25+ gratis modellen (50 req/dag) |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-flash` | betaald, zeer goedkoop |
+| Anthropic (Claude) | `anthropic` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | betaald |
+| xAI (Grok) | `xai` | `XAI_API_KEY` | `grok-4.3` | betaald |
+| Together AI | `together` | `TOGETHER_API_KEY` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | betaald, goedkoop |
+| Perplexity | `perplexity` | `PERPLEXITY_API_KEY` | `sonar` | betaald, per gebruik |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | betaald |
+| Ollama (lokaal) | `ollama` | — | `qwen3:4b` | gratis, lokaal |
 
 ## Snel starten (Docker)
 
@@ -63,8 +74,10 @@ In het kort:
 
 1. Fork deze repository naar je eigen GitHub-account.
 2. Render Dashboard → **New → Blueprint** → selecteer de repository.
-3. Vul éénmalig de gevraagde geheimen in (`DISCORD_TOKEN`, `GROQ_API_KEY` of
-   `OPENAI_API_KEY`, `AI_PROVIDER`).
+3. Vul éénmalig de gevraagde geheimen in (`DISCORD_TOKEN`, `AI_PROVIDER`,
+   `GROQ_API_KEY` of `OPENAI_API_KEY`). Gebruik je een andere provider
+   (Gemini, Mistral, DeepSeek, …), voeg dan de bijbehorende `<PROVIDER>_API_KEY`
+   toe bij **Environment** in het Render-dashboard (zie de tabel hieronder).
 4. Zet [UptimeRobot Free](https://uptimerobot.com) op
    `https://<servicenaam>.onrender.com/readyz` (HTTP-check, elke 5 minuten).
 
@@ -111,7 +124,8 @@ backup-tips.
 
 ## Cloud AI configureren
 
-### Groq
+Kies een provider uit de tabel hierboven, zet `AI_PROVIDER` op de bijbehorende
+waarde en vul alleen de key van die provider in. Voorbeeld (Groq):
 
 ```env
 AI_PROVIDER=groq
@@ -119,13 +133,18 @@ GROQ_API_KEY=...
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
-### OpenAI
+Elke provider heeft een `<PROVIDER>_MODEL`-instelling om het standaardmodel te
+overschrijven (bijv. `GEMINI_MODEL`, `DEEPSEEK_MODEL`, `XAI_MODEL`). Modelnamen
+wijzigen regelmatig bij providers — controleer de modelpagina van je provider
+als een model niet gevonden wordt. Let op:
 
-```env
-AI_PROVIDER=openai
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4o-mini
-```
+- `anthropic`, `openrouter` en `perplexity` negeren of ondersteunen
+  `response_format` niet overal; de bot vraagt daar JSON via de prompt (met
+  validatie-retries als vangnet);
+- OpenRouter's `openrouter/free` kiest automatisch een gratis model
+  (beperkt tot ~50 requests/dag op het gratis account);
+- `OPENAI_BASE_URL` blijft beschikbaar om OpenAI naar een eigen
+  OpenAI-compatibele endpoint te wijzen.
 
 Alleen de key van de gekozen provider is nodig. API keys worden niet door de
 setup-tool gevraagd, geprint of in configuratiebestanden geschreven.

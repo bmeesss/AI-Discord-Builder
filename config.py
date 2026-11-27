@@ -13,10 +13,12 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
+from ai.providers.registry import CLOUD_PRESETS, SUPPORTED_PROVIDERS
+
 load_dotenv()
 
 
-VALID_AI_PROVIDERS = frozenset({"groq", "openai", "ollama"})
+VALID_AI_PROVIDERS = SUPPORTED_PROVIDERS
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -53,14 +55,44 @@ def _env_int(name: str, default: int, minimum: int = 0) -> int:
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # --- AI providers ---
+# Provider names, API-key env vars and default models come from
+# ai.providers.registry (single source of truth).  Only the selected
+# provider's key is required; all cloud providers use the same OpenAI-
+# compatible request shape.
 AI_PROVIDER = os.getenv("AI_PROVIDER", "groq").strip().lower()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", CLOUD_PRESETS["groq"].default_model)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", CLOUD_PRESETS["openai"].default_model)
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or None
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", CLOUD_PRESETS["gemini"].default_model)
+
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", CLOUD_PRESETS["mistral"].default_model)
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL", CLOUD_PRESETS["openrouter"].default_model
+)
+
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", CLOUD_PRESETS["deepseek"].default_model)
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", CLOUD_PRESETS["anthropic"].default_model)
+
+XAI_API_KEY = os.getenv("XAI_API_KEY")
+XAI_MODEL = os.getenv("XAI_MODEL", CLOUD_PRESETS["xai"].default_model)
+
+TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+TOGETHER_MODEL = os.getenv("TOGETHER_MODEL", CLOUD_PRESETS["together"].default_model)
+
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+PERPLEXITY_MODEL = os.getenv("PERPLEXITY_MODEL", CLOUD_PRESETS["perplexity"].default_model)
 
 # Ollama has no API key.  ``LOCAL_AI_MODEL`` is accepted as a friendly alias;
 # OLLAMA_MODEL remains the canonical provider setting.
@@ -143,10 +175,29 @@ def validate_config(
             f"Unknown AI_PROVIDER={provider!r}. Supported providers: {supported}."
         )
 
-    if provider == "groq" and not configured("GROQ_API_KEY", GROQ_API_KEY):
-        missing.append("GROQ_API_KEY")
-    elif provider == "openai" and not configured("OPENAI_API_KEY", OPENAI_API_KEY):
-        missing.append("OPENAI_API_KEY")
+    api_key_defaults = {
+        "groq": ("GROQ_API_KEY", GROQ_API_KEY),
+        "openai": ("OPENAI_API_KEY", OPENAI_API_KEY),
+        "gemini": ("GEMINI_API_KEY", GEMINI_API_KEY),
+        "mistral": ("MISTRAL_API_KEY", MISTRAL_API_KEY),
+        "openrouter": ("OPENROUTER_API_KEY", OPENROUTER_API_KEY),
+        "deepseek": ("DEEPSEEK_API_KEY", DEEPSEEK_API_KEY),
+        "anthropic": ("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY),
+        "xai": ("XAI_API_KEY", XAI_API_KEY),
+        "together": ("TOGETHER_API_KEY", TOGETHER_API_KEY),
+        "perplexity": ("PERPLEXITY_API_KEY", PERPLEXITY_API_KEY),
+    }
+    # Sanity: every registered cloud provider must have a key mapping (and
+    # vice versa), so a new registry entry cannot silently skip validation.
+    if set(api_key_defaults) != set(CLOUD_PRESETS):
+        raise RuntimeError(
+            "Provider API-key validation is out of sync with ai.providers.registry."
+        )
+
+    if provider in api_key_defaults:
+        key_name, key_default = api_key_defaults[provider]
+        if not configured(key_name, key_default):
+            missing.append(key_name)
     elif provider == "ollama":
         model = (
             configured("OLLAMA_MODEL", OLLAMA_MODEL)
