@@ -11,7 +11,9 @@ verbindingsbeheer.
 - Docker met de Compose-plugin (`docker compose version`), of Python 3.11+;
 - een Discord-application met bot-token
   ([Discord Developer Portal](https://discord.com/developers/applications));
-- alleen voor cloud AI: een API-key van Groq of OpenAI;
+- alleen voor cloud AI: een API-key van de gekozen provider (Groq, Google
+  Gemini, Mistral, OpenRouter, DeepSeek, Anthropic, xAI, Together AI,
+  Perplexity of OpenAI);
 - alleen voor local AI: voldoende hardware voor het gekozen Ollama-model.
 
 Liever gehost zonder eigen server? Zie **[render.md](render.md)** voor het
@@ -117,12 +119,20 @@ de rest heeft werkende standaarden.
 | Variabele | Standaard | Verplicht? | Betekenis |
 | --- | --- | --- | --- |
 | `DISCORD_TOKEN` | — | ja | Discord bot-token |
-| `AI_PROVIDER` | `groq` | ja | `groq`, `openai` of `ollama` |
+| `AI_PROVIDER` | `groq` | ja | `groq`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek`, `anthropic`, `xai`, `together`, `perplexity` of `ollama` |
 | `GROQ_API_KEY` | — | bij `groq` | Groq API-key |
 | `GROQ_MODEL` | `llama-3.3-70b-versatile` | nee | Groq modelnaam |
 | `OPENAI_API_KEY` | — | bij `openai` | OpenAI API-key |
 | `OPENAI_MODEL` | `gpt-4o-mini` | nee | OpenAI modelnaam |
 | `OPENAI_BASE_URL` | — | nee | optioneel OpenAI-compatible endpoint (uit) |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | `gemini-4-hydrogen` | bij `gemini` | Google Gemini key en modelnaam |
+| `MISTRAL_API_KEY` / `MISTRAL_MODEL` | `mistral-small-latest` | bij `mistral` | Mistral key en modelnaam |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | `openrouter/free` | bij `openrouter` | OpenRouter key en modelnaam |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` | `deepseek-flash` | bij `deepseek` | DeepSeek key en modelnaam |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | `claude-haiku-4-5` | bij `anthropic` | Anthropic (Claude) key en modelnaam |
+| `XAI_API_KEY` / `XAI_MODEL` | `grok-4.3` | bij `xai` | xAI (Grok) key en modelnaam |
+| `TOGETHER_API_KEY` / `TOGETHER_MODEL` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | bij `together` | Together AI key en modelnaam |
+| `PERPLEXITY_API_KEY` / `PERPLEXITY_MODEL` | `sonar` | bij `perplexity` | Perplexity key en modelnaam |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | bij `ollama` | Ollama endpoint (Compose-overlay: `http://ollama:11434`) |
 | `OLLAMA_MODEL` | `qwen3:4b` | bij `ollama` | lokaal model |
 | `OLLAMA_HOST_PORT` | `11434` | nee | host-poort voor de Ollama-container (alleen Compose) |
@@ -248,6 +258,10 @@ Ollama is alleen nodig bij `AI_PROVIDER=ollama`. Zie
 Werkt met elke opslagvorm (de opslag is sowieso databasevrij):
 
 ```env
-AI_PROVIDER=groq      # of openai
-GROQ_API_KEY=...      # of OPENAI_API_KEY=...
+AI_PROVIDER=groq      # of openai, gemini, mistral, openrouter, deepseek,
+                      # anthropic, xai, together, perplexity
+GROQ_API_KEY=...      # of de key van de gekozen provider
 ```
+
+Zie de tabel hierboven voor alle providers, key-variabelen en
+standaardmodellen.

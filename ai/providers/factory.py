@@ -8,9 +8,10 @@ import config
 from ai.providers.base import AIProvider, ProviderError, ProviderSettings
 from ai.providers.groq import GroqProvider
 from ai.providers.ollama import OllamaProvider
-from ai.providers.openai import OpenAIProvider
+from ai.providers.openai_compatible import OpenAICompatibleProvider
+from ai.providers.registry import CLOUD_PRESETS, SUPPORTED_PROVIDERS
 
-SUPPORTED_PROVIDERS = frozenset({"groq", "openai", "ollama"})
+__all__ = ["SUPPORTED_PROVIDERS", "create_provider"]
 
 
 def create_provider(
@@ -34,14 +35,6 @@ def create_provider(
             timeout=timeout,
         )
 
-    if name == "openai":
-        return OpenAIProvider(
-            api_key=values.OPENAI_API_KEY,
-            model=values.OPENAI_MODEL,
-            base_url=getattr(values, "OPENAI_BASE_URL", None),
-            timeout=timeout,
-        )
-
     if name == "ollama":
         try:
             return OllamaProvider(
@@ -51,6 +44,25 @@ def create_provider(
             )
         except ValueError as exc:
             raise ProviderError(str(exc)) from exc
+
+    preset = CLOUD_PRESETS.get(name)
+    if preset is not None:
+        base_url = preset.base_url
+        if name == "openai":
+            # Optional OpenAI-compatible endpoint override (kept for
+            # backwards compatibility); the other presets use their
+            # provider's own fixed endpoint.
+            base_url = getattr(values, "OPENAI_BASE_URL", None) or None
+        return OpenAICompatibleProvider(
+            name=preset.name,
+            display=preset.display,
+            api_key=getattr(values, preset.api_key_env, None),
+            key_env=preset.api_key_env,
+            model=getattr(values, preset.model_env, None) or preset.default_model,
+            base_url=base_url,
+            timeout=timeout,
+            json_mode=preset.json_mode,
+        )
 
     supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
     raise ProviderError(

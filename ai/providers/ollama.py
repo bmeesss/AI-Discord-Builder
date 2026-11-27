@@ -23,7 +23,7 @@ class OllamaHTTPClient:
 
     A client can be injected into :class:`OllamaProvider` in tests.  Production
     uses aiohttp lazily, so cloud-only installations do not import it while
-    selecting Groq or OpenAI.
+    selecting a cloud provider.
     """
 
     def __init__(self, base_url: str, timeout: int = 60) -> None:

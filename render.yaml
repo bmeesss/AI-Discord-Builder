@@ -43,8 +43,12 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
-      # --- Provider selection: enter "groq" (recommended) or "openai".
-      # ("ollama" needs a reachable Ollama server and is not practical on Render.)
+      # --- Provider selection: "groq", "openai", "gemini", "mistral",
+      # "openrouter", "deepseek", "anthropic", "xai", "together",
+      # "perplexity". ("ollama" needs a reachable Ollama server and is not
+      # practical on Render.) Using a provider other than Groq/OpenAI? Add
+      # its <PROVIDER>_API_KEY (e.g. GEMINI_API_KEY) under "Environment" in
+      # the Render dashboard after creating the service.
       - key: AI_PROVIDER
         sync: false
       # --- Local JSON storage lives in the container's ephemeral filesystem.

@@ -1,15 +1,15 @@
-"""AI provider adapters for Groq, OpenAI and Ollama.
+"""AI provider adapters for the supported cloud and local backends.
 
-The package initializer intentionally imports only the lightweight contracts.
-Provider SDKs and application configuration are loaded when the factory selects
-a provider, so importing local tooling does not initialize cloud clients.
+The package initializer intentionally imports only the lightweight contracts
+and the static provider registry. Provider SDKs and application
+configuration are loaded when the factory selects a provider, so importing
+local tooling does not initialize cloud clients.
 """
 
 from typing import Any
 
 from ai.providers.base import AIProvider, ProviderError, ProviderHealth
-
-SUPPORTED_PROVIDERS = frozenset({"groq", "openai", "ollama"})
+from ai.providers.registry import SUPPORTED_PROVIDERS
 
 
 def create_provider(*args: Any, **kwargs: Any) -> AIProvider:
